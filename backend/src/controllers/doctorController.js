@@ -1,2 +1,4 @@
-function listDoctorAccess(_req, res) { return res.json({ providerVerification: "required", permissions: ["read", "write", "emergency-critical-only"] }); }
-module.exports = { listDoctorAccess };
+function createDoctorController({ chain }) {
+  return { access: async (_req, res) => res.json({ providerVerification: "required", chainMode: chain.enabled ? "configured" : "memory/client-wallet", permissions: ["read", "write", "emergency-critical-only"] }) };
+}
+module.exports = { createDoctorController };

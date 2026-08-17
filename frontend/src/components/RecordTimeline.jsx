@@ -1,1 +1,1 @@
-export default function RecordTimeline() { return null; }
+export default function RecordTimeline({ records = [] }) { return <div className="timeline">{records.length ? records.map((record) => <div key={record.id}><span>{new Date(record.createdAt).toLocaleDateString()}</span><b>{record.recordType}</b><small>{record.doctorId} • {record.ipfsCid}</small></div>) : <p className="muted">No records have been added yet.</p>}</div>; }

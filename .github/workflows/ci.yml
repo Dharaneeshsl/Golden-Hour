@@ -1,4 +1,4 @@
-name: GoldenHour CI
+name: validate
 on: [push, pull_request]
 jobs:
   validate:
@@ -6,11 +6,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20, cache: npm }
-      - run: npm install
-      - run: npx hardhat compile
-      - run: npm test
-      - run: npm --prefix backend install
-      - run: npm --prefix backend run check
-      - run: npm --prefix frontend install
-      - run: npm --prefix frontend run build
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm run install:all
+      - run: npm run check

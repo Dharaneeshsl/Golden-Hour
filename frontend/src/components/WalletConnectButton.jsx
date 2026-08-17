@@ -1,1 +1,2 @@
-export default function WalletConnectButton() { return null; }
+import { useState } from "react"; import { useContract } from "../hooks/useContract"; import { shortenAddress } from "../utils/web3";
+export default function WalletConnectButton({ onConnected }) { const [address, setAddress] = useState(""); const [error, setError] = useState(""); const { connect } = useContract(); const handle = async () => { try { const wallet = await connect(); setAddress(wallet.address); onConnected?.(wallet.address); setError(""); } catch (err) { setError(err.message); } }; return <div><button className="wallet" onClick={handle}>{address ? shortenAddress(address) : "Connect wallet"}</button>{error && <small className="error">{error}</small>}</div>; }

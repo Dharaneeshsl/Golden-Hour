@@ -1,1 +1,2 @@
-export default function QRCodeCard() { return null; }
+import { QRCodeSVG } from "qrcode.react";
+export default function QRCodeCard({ patientId }) { return <div className="qr"><QRCodeSVG value={`goldenhour://patient/${patientId}`} size={112}/><div><b>Emergency QR card</b><p>Verified clinicians can use this ID to request logged, critical-only access.</p><button className="text-button" onClick={() => navigator.clipboard?.writeText(`goldenhour://patient/${patientId}`)}>Copy QR payload →</button></div></div>; }

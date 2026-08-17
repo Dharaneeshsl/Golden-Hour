@@ -1,2 +1,2 @@
-const express = require("express");
-module.exports = (controller) => { const router = express.Router(); router.get("/access", controller.listDoctorAccess); return router; };
+const express = require("express"); const { requireAuth } = require("../middleware/authMiddleware");
+module.exports = (controller) => { const router = express.Router(); router.get("/access", requireAuth, controller.access); return router; };

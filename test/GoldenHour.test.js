@@ -1,5 +1,6 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
+const { time } = require("@nomicfoundation/hardhat-network-helpers");
 
 describe("GoldenHour contracts", function () {
   async function deploy() {
@@ -28,6 +29,25 @@ describe("GoldenHour contracts", function () {
     await access.connect(patient).grantAccess(1, doctor.address, 0);
     await records.connect(doctor).addRecord(1, "allergy", "ipfs://demo", ethers.id("encrypted"));
     expect(await records.recordCount(1)).to.equal(1);
+  });
+  it("rejects unverified providers and enforces patient ownership", async function () {
+    const { registry, access, patient, doctor, stranger } = await deploy();
+    await registry.connect(patient).registerPatient(ethers.id("profile"), ethers.id("critical"));
+    await expect(access.connect(stranger).grantAccess(1, doctor.address, 0)).to.be.revertedWith("Not patient owner");
+    await expect(access.connect(patient).grantAccess(1, stranger.address, 0)).to.be.revertedWith("Provider not verified");
+    await expect(access.connect(patient).grantAccess(1, doctor.address, 1)).to.be.revertedWith("Invalid expiry");
+  });
+  it("supports expiry and revocation", async function () {
+    const { registry, access, patient, doctor } = await deploy();
+    await registry.connect(patient).registerPatient(ethers.id("profile"), ethers.id("critical"));
+    const expiry = (await time.latest()) + 60;
+    await access.connect(patient).grantAccess(1, doctor.address, expiry);
+    expect(await access.checkAccess(1, doctor.address)).to.equal(true);
+    await time.increaseTo(expiry + 1);
+    expect(await access.checkAccess(1, doctor.address)).to.equal(false);
+    await access.connect(patient).grantAccess(1, doctor.address, 0);
+    await access.connect(patient).revokeAccess(1, doctor.address);
+    expect(await access.checkAccess(1, doctor.address)).to.equal(false);
   });
   it("logs justified emergency access", async function () {
     const { registry, access, audit, emergency, patient, doctor } = await deploy();
