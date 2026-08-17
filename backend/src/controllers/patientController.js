@@ -1,0 +1,2 @@
+function createPatient(store, req, res) { const { wallet, profile, critical } = req.body || {}; if (!wallet || !profile || !critical) return res.status(400).json({ error: "wallet, profile and critical are required" }); if (store.has(wallet)) return res.status(409).json({ error: "Patient already registered" }); const patient = { id: String(store.size + 1), wallet, profile, critical, createdAt: new Date().toISOString() }; store.set(wallet, patient); return res.status(201).json(patient); }
+module.exports = { createPatient };

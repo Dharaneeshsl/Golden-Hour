@@ -1,0 +1,15 @@
+require("dotenv").config();
+const express = require("express"); const cors = require("cors"); const helmet = require("helmet");
+const { encryptJson } = require("./services/encryptionService"); const { uploadEncrypted } = require("./services/ipfsService");
+const app = express(); const port = Number(process.env.PORT || 4000);
+app.use(helmet()); app.use(cors()); app.use(express.json({ limit: "1mb" }));
+const patients = new Map(); const records = new Map(); const audit = [];
+app.get("/health", (_req, res) => res.json({ status: "ok", service: "goldenhour-api", timestamp: new Date().toISOString() }));
+app.post("/api/patients", (req, res) => { const { wallet, profile, critical } = req.body || {}; if (!wallet || !profile || !critical) return res.status(400).json({ error: "wallet, profile and critical are required" }); if (patients.has(wallet)) return res.status(409).json({ error: "Patient already registered" }); const id = String(patients.size + 1); patients.set(wallet, { id, wallet, profile, critical, createdAt: new Date().toISOString() }); res.status(201).json(patients.get(wallet)); });
+app.get("/api/patients/:id", (req, res) => { const patient = [...patients.values()].find((p) => p.id === req.params.id); if (!patient) return res.status(404).json({ error: "Patient not found" }); res.json({ id: patient.id, wallet: patient.wallet, critical: patient.critical }); });
+app.post("/api/records", async (req, res) => { const { patientId, recordType, clinicalData, doctorId } = req.body || {}; if (!patientId || !recordType || !clinicalData || !doctorId) return res.status(400).json({ error: "patientId, recordType, clinicalData and doctorId are required" }); const encrypted = encryptJson(clinicalData); const stored = await uploadEncrypted(encrypted); const record = { id: String(records.size + 1), patientId, recordType, doctorId, ipfsCid: stored.cid, encryptedHash: require("crypto").createHash("sha256").update(JSON.stringify(encrypted)).digest("hex"), createdAt: new Date().toISOString() }; records.set(record.id, record); res.status(201).json(record); });
+app.get("/api/records/:patientId", (req, res) => res.json([...records.values()].filter((r) => r.patientId === req.params.patientId)));
+app.post("/api/emergency-access", (req, res) => { const { patientId, doctorId, justification } = req.body || {}; if (!patientId || !doctorId || !justification || justification.length < 10) return res.status(400).json({ error: "A patient, doctor and justification of at least 10 characters are required" }); const event = { patientId, doctorId, justification, scope: "EMERGENCY_CRITICAL_ONLY", timestamp: new Date().toISOString() }; audit.push(event); const patient = [...patients.values()].find((p) => p.id === patientId); if (!patient) return res.status(404).json({ error: "Patient not found" }); res.json({ patientId, critical: patient.critical, audit: event }); });
+app.get("/api/audit/:patientId", (req, res) => res.json(audit.filter((e) => e.patientId === req.params.patientId)));
+if (require.main === module) app.listen(port, () => console.log(`GoldenHour API listening on http://localhost:${port}`));
+module.exports = app;
