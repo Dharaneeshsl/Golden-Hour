@@ -1,17 +1,6 @@
-require("dotenv").config();
-const express = require("express"); const cors = require("cors"); const helmet = require("helmet");
-const { JsonStore } = require("./config/db"); const { ChainService } = require("./services/chainService");
-const encryption = require("./services/encryptionService"); const ipfs = require("./services/ipfsService");
-const { createPatientController } = require("./controllers/patientController"); const { createDoctorController } = require("./controllers/doctorController");
-const { createRecordController } = require("./controllers/recordController"); const { createEmergencyController } = require("./controllers/emergencyController");
-const patientRoutes = require("./routes/patientRoutes"); const doctorRoutes = require("./routes/doctorRoutes"); const recordRoutes = require("./routes/recordRoutes"); const emergencyRoutes = require("./routes/emergencyRoutes"); const authRoutes = require("./routes/authRoutes");
-function createApp({ store = new JsonStore(), chain = new ChainService() } = {}) {
-  const app = express(); const allowedOrigin = process.env.FRONTEND_ORIGIN || "http://localhost:5173";
-  app.use(helmet()); app.use(cors({ origin: allowedOrigin, credentials: true })); app.use(express.json({ limit: "1mb" }));
-  const context = { store, chain, encryption, ipfs };
-  app.get("/health", (_req, res) => res.json({ status: "ok", service: "goldenhour-api", chainMode: chain.enabled ? "configured" : "memory/client-wallet", timestamp: new Date().toISOString() }));
-  app.use("/api/auth", authRoutes()); app.use("/api/patients", patientRoutes(createPatientController(context))); app.use("/api/doctors", doctorRoutes(createDoctorController(context))); app.use("/api/records", recordRoutes(createRecordController(context))); app.use("/api/emergency-access", emergencyRoutes(createEmergencyController(context)));
-  return app;
-}
-const app = createApp(); if (require.main === module) app.listen(Number(process.env.PORT || 4000), () => console.log(`GoldenHour API listening on http://localhost:${process.env.PORT || 4000}`));
-module.exports = { app, createApp };
+require("dotenv").config(); const express=require("express"); const cors=require("cors"); const helmet=require("helmet"); const rateLimit=require("express-rate-limit"); const crypto=require("crypto");
+const {JsonStore}=require("./config/db"); const {ChainService}=require("./services/chainService"); const encryption=require("./services/encryptionService"); const ipfs=require("./services/ipfsService");
+const {createPatientController}=require("./controllers/patientController"); const {createDoctorController}=require("./controllers/doctorController"); const {createRecordController}=require("./controllers/recordController"); const {createEmergencyController}=require("./controllers/emergencyController");
+const patientRoutes=require("./routes/patientRoutes"),doctorRoutes=require("./routes/doctorRoutes"),recordRoutes=require("./routes/recordRoutes"),emergencyRoutes=require("./routes/emergencyRoutes"),authRoutes=require("./routes/authRoutes");
+function createApp({store=new JsonStore(),chain=new ChainService()}={}){ const app=express(),allowed=process.env.FRONTEND_ORIGIN||"http://localhost:5173"; app.disable("x-powered-by"); app.use((req,res,next)=>{req.requestId=crypto.randomUUID();res.setHeader("X-Request-Id",req.requestId);next();}); app.use(helmet()); app.use(cors({origin:allowed,credentials:true})); app.use(express.json({limit:"256kb"})); app.use("/api",rateLimit({windowMs:15*60*1000,max:300,standardHeaders:true,legacyHeaders:false})); const context={store,chain,encryption,ipfs}; app.get("/health",(_q,res)=>res.json({status:"ok",service:"goldenhour-api",timestamp:new Date().toISOString()})); app.get("/ready",async(_q,res)=>res.json({status:"ready",chain:chain.enabled?"configured":"client-wallet-required"})); app.use("/api/auth",rateLimit({windowMs:15*60*1000,max:30}),authRoutes()); app.use("/api/patients",patientRoutes(createPatientController(context))); app.use("/api/doctors",doctorRoutes(createDoctorController(context))); app.use("/api/records",recordRoutes(createRecordController(context))); app.use("/api/emergency-access",rateLimit({windowMs:15*60*1000,max:20}),emergencyRoutes(createEmergencyController(context))); app.use((err,req,res,_next)=>res.status(500).json({error:"Internal server error",requestId:req.requestId})); return app; }
+const app=createApp(); if(require.main===module) app.listen(Number(process.env.PORT||4000),()=>console.log(`GoldenHour API listening on http://localhost:${process.env.PORT||4000}`)); module.exports={app,createApp};
