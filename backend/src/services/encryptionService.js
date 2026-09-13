@@ -1,13 +1,5 @@
-const crypto = require("crypto");
-const KEY = () => crypto.createHash("sha256").update(process.env.ENCRYPTION_KEY || "local-development-key").digest();
-function encryptJson(value) {
-  const iv = crypto.randomBytes(12); const cipher = crypto.createCipheriv("aes-256-gcm", KEY(), iv);
-  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()]);
-  return { algorithm: "aes-256-gcm", iv: iv.toString("base64"), tag: cipher.getAuthTag().toString("base64"), ciphertext: ciphertext.toString("base64") };
-}
-function decryptJson(payload) {
-  const decipher = crypto.createDecipheriv("aes-256-gcm", KEY(), Buffer.from(payload.iv, "base64"));
-  decipher.setAuthTag(Buffer.from(payload.tag, "base64"));
-  return JSON.parse(Buffer.concat([decipher.update(Buffer.from(payload.ciphertext, "base64")), decipher.final()]).toString("utf8"));
-}
-module.exports = { encryptJson, decryptJson };
+const crypto=require("crypto");
+function key(){const raw=process.env.ENCRYPTION_KEY;if(!raw)throw new Error("ENCRYPTION_KEY must be configured");const k=Buffer.from(raw,"base64");if(k.length!==32)throw new Error("ENCRYPTION_KEY must be a base64-encoded 32-byte key");return k}
+function encryptJson(value){const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv("aes-256-gcm",key(),iv);const ciphertext=Buffer.concat([cipher.update(JSON.stringify(value),"utf8"),cipher.final()]);return{version:1,algorithm:"aes-256-gcm",iv:iv.toString("base64"),tag:cipher.getAuthTag().toString("base64"),ciphertext:ciphertext.toString("base64")}}
+function decryptJson(p){if(!p||p.version!==1||p.algorithm!=="aes-256-gcm")throw new Error("Unsupported encrypted payload");const d=crypto.createDecipheriv("aes-256-gcm",key(),Buffer.from(p.iv,"base64"));d.setAuthTag(Buffer.from(p.tag,"base64"));return JSON.parse(Buffer.concat([d.update(Buffer.from(p.ciphertext,"base64")),d.final()]).toString("utf8"))}
+module.exports={encryptJson,decryptJson};
