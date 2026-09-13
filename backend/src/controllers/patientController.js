@@ -1,16 +1,3 @@
-function createPatientController({ store, chain }) {
-  return {
-    create: async (req, res) => {
-      const wallet = req.body.wallet || req.user.wallet;
-      const { profile, critical } = req.body || {};
-      if (!wallet || !profile || !critical) return res.status(400).json({ error: "wallet, profile and critical are required" });
-      if (store.patientByWallet(wallet)) return res.status(409).json({ error: "Patient already registered" });
-      const patient = store.addPatient({ id: String(store.state.patients.length + 1), wallet, profile, critical, createdAt: new Date().toISOString() });
-      let chainResult = { mode: "memory", status: "client-wallet-required" };
-      try { chainResult = await chain.registerPatient(profile, critical); } catch (error) { return res.status(502).json({ error: "Blockchain registration failed", detail: error.shortMessage || error.message }); }
-      return res.status(201).json({ ...patient, chain: chainResult });
-    },
-    get: (req, res) => { const patient = store.patientById(req.params.id); if (!patient) return res.status(404).json({ error: "Patient not found" }); return res.json({ ...patient, records: store.recordsForPatient(patient.id), audit: store.auditForPatient(patient.id) }); }
-  };
-}
-module.exports = { createPatientController };
+const crypto=require("crypto");
+function createPatientController({store,chain}){return{create:async(req,res)=>{const wallet=req.user.wallet,{profile,critical}=req.body||{};if(!profile||!critical)return res.status(400).json({error:"profile and critical are required"});if(store.patientByWallet(wallet))return res.status(409).json({error:"Patient already registered"});const patient={id:crypto.randomUUID(),wallet,profile,critical,createdAt:new Date().toISOString()};store.addPatient(patient);store.addAudit({id:crypto.randomUUID(),patientId:patient.id,actor:wallet,action:"PATIENT_REGISTERED",timestamp:new Date().toISOString()});return res.status(201).json(patient)},get:(req,res)=>{const patient=store.patientById(req.params.id);if(!patient)return res.status(404).json({error:"Patient not found"});if(req.user.role!=="admin"&&patient.wallet.toLowerCase()!==req.user.wallet.toLowerCase())return res.status(403).json({error:"Patient data access denied"});return res.json({...patient,records:store.recordsForPatient(patient.id),audit:store.auditForPatient(patient.id)})}}}
+module.exports={createPatientController};
