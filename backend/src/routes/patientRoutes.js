@@ -1,4 +1,1 @@
-const express = require("express");
-const { requireAuth } = require("../middleware/authMiddleware");
-const { requireRole } = require("../middleware/roleCheck");
-module.exports = (controller) => { const router = express.Router(); router.post("/", requireAuth, requireRole("patient", "admin"), controller.create); router.get("/:id", requireAuth, controller.get); return router; };
+const express=require("express");const{requireAuth}=require("../middleware/authMiddleware");module.exports=c=>{const r=express.Router();r.post("/",requireAuth,c.create);r.get("/:id",requireAuth,c.get);return r};
