@@ -1,2 +1,1 @@
-function requireRole(...roles) { return (req, res, next) => { if (!req.user || !roles.includes(req.user.role)) return res.status(403).json({ error: "Insufficient role" }); next(); }; }
-module.exports = { requireRole };
+function requireRole(...roles){return(req,res,next)=>{if(!req.user||!roles.includes(req.user.role))return res.status(403).json({error:"Insufficient role"});next()}}function requireVerifiedProvider(store){return(req,res,next)=>{const p=store.providerByWallet(req.user.wallet);if(!p||p.status!=="verified")return res.status(403).json({error:"Verified provider access required"});req.provider=p;next()}}module.exports={requireRole,requireVerifiedProvider};
