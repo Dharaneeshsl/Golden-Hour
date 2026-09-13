@@ -1,55 +1,327 @@
-# GoldenHour
+# 🏥 GoldenHour
 
-GoldenHour is a privacy-first emergency medical history demo. It models patient-controlled identity, append-only medical record hashes, verified-provider access, authenticated API sessions, and a break-glass emergency flow. This repository is a demonstration baseline and must not be used with real patient data.
+> **Privacy-first emergency medical information access with patient consent, verified providers, encryption and blockchain auditability.**
 
-## Current completion level
+GoldenHour is a full-stack healthcare technology project that demonstrates how emergency medical information can be made available quickly **without giving up patient control and privacy**.
 
-The implementation is approximately **95–97% complete for the stated demo scope**. The browser UI now uses real routed components, wallet connection through `window.ethereum`, authenticated API requests, persisted local demo state, and an explicit contract integration seam. The remaining gap is production hardening: signed nonce authentication, audited key management, durable production database, permissioned provider verification, deployment observability, and clinical/privacy compliance.
+> ⚠️ **Important:** GoldenHour is an engineering and portfolio project. It is **not certified for real clinical use** and must not be used with real patient data without security, compliance and clinical validation.
 
-## Quick start
+---
+
+## ✨ What problem does it solve?
+
+In an emergency, doctors may need critical information immediately:
+
+- Allergies
+- Blood group
+- Chronic conditions
+- Emergency contacts
+- Important medical history
+
+Traditional systems can be slow or fragmented. GoldenHour models a secure flow where the patient controls normal access, while verified providers can use a **time-limited, audited break-glass workflow** during emergencies.
+
+## 🧠 Architecture at a glance
+
+```
+React + Vite Frontend
+        │
+        │ Wallet authentication / REST API
+        ▼
+Express Backend
+ ├── Authentication
+ ├── Provider verification
+ ├── Patient consent
+ ├── Emergency break-glass
+ ├── Encryption
+ └── Audit logging
+        │
+   ┌────┴─────────┐
+   ▼              ▼
+PostgreSQL       IPFS
+Metadata        Encrypted payload
+   │
+   ▼
+Ethereum / Solidity
+Audit & record integrity
+```
+
+## 🔐 Core security model
+
+### 1. Wallet authentication
+```
+Wallet → Nonce → Signature → Server verification → JWT
+```
+
+A wallet proves ownership of an identity. It does **not** automatically prove medical credentials.
+
+### 2. Provider verification
+```
+Provider registers
+      ↓
+PENDING
+      ↓
+Admin / institution verification
+      ↓
+VERIFIED
+      ↓
+Clinical workflows
+```
+
+### 3. Patient consent
+Normal record access requires:
+
+```
+Verified Provider
+       +
+Active Patient Consent
+       =
+Record Access
+```
+
+Patients can grant, revoke and review provider consent.
+
+### 4. Emergency break-glass
+
+```
+Verified Provider
+       +
+Emergency justification
+       ↓
+Critical information only
+       ↓
+Time limited
+       ↓
+Audited event
+```
+
+Emergency access is intentionally separate from normal consent access.
+
+## 🧩 Features
+
+### 👤 Patient
+- Wallet-based identity
+- Register medical profile
+- Manage critical information
+- View records
+- Grant provider consent
+- Revoke provider consent
+- View audit history
+
+### 🩺 Provider
+- Register as provider
+- Pending → verified lifecycle
+- Patient-consented record access
+- Clinical record creation
+- Audited actions
+
+### 🚨 Emergency
+- Verified-provider access
+- Required justification
+- Critical-only scope
+- Time-bounded access
+- Immutable audit trail model
+
+### 🔒 Security
+- Helmet security headers
+- Rate limiting
+- Request IDs
+- JWT authentication
+- AES-256-GCM encryption
+- Patient ownership checks
+- Database-backed provider verification
+- Consent enforcement
+- Safe IPFS failure handling
+
+## 📁 Project structure
+
+```
+Golden-Hour/
+├── contracts/          # Solidity smart contracts
+├── scripts/            # Contract deployment scripts
+├── test/               # Smart contract tests
+├── backend/
+│   ├── src/
+│   │   ├── controllers/
+│   │   ├── middleware/
+│   │   ├── routes/
+│   │   ├── services/
+│   │   └── config/
+│   └── migrations/     # PostgreSQL schema
+├── frontend/
+│   └── src/            # React application
+├── docs/               # Architecture/API documentation
+└── .github/workflows/  # CI
+```
+
+## 🚀 Quick start
+
+### Requirements
+- Node.js 20+
+- npm
+- PostgreSQL (recommended)
+- MetaMask or compatible EIP-1193 wallet
+- Optional: IPFS/Pinata credentials
+
+### Install
 
 ```bash
+git clone https://github.com/Dharaneeshsl/Golden-Hour.git
+cd Golden-Hour
 npm run install:all
-cp .env.example .env
+```
+
+### Configure
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Generate an encryption key:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+Set it as `ENCRYPTION_KEY`.
+
+### Run validation
+
+```bash
 npm run check
-npm run node
-# in another terminal
-npm run deploy:local
+```
+
+### Start locally
+
+```bash
 npm run backend
 npm run frontend
 ```
 
-Open <http://localhost:5173>. The API health endpoint is <http://localhost:4000/health>. The local JSON demo store is written to `.data/goldenhour.json` and is ignored by Git.
+Frontend: `http://localhost:5173`
 
-## Authentication and roles
+Backend health: `http://localhost:4000/health`
 
-`POST /api/auth/login` issues an eight-hour demo JWT for a validated EVM wallet address and one of the `patient`, `doctor`, or `admin` roles. Protected routes require `Authorization: Bearer <token>`. A production deployment must replace this demo login with a signed wallet nonce and server-side replay protection.
+## 🗄️ PostgreSQL
 
-## Contract integration
+GoldenHour supports PostgreSQL for durable persistence.
 
-The backend reads `RPC_URL`, `BACKEND_PRIVATE_KEY`, and the five address variables from `.env`. When a backend signer and deployed addresses are present, patient registration, record creation, and emergency access invoke the corresponding ethers contract methods. Without those settings, the API remains runnable in safe `memory/client-wallet` mode and returns an explicit chain status rather than pretending a transaction occurred.
+```bash
+npm --prefix backend run db:migrate
+```
 
-The frontend reads its API and address variables from `frontend/.env.local`; a complete template is provided at `frontend/.env.example`. `WalletConnectButton` requests accounts through MetaMask or another EIP-1193-compatible wallet, while `useContract` exposes the configured registry contract for future signed client-side flows.
+Main tables:
 
-## Validation
+| Table | Purpose |
+|---|---|
+| patients | Patient identity and profile metadata |
+| providers | Provider verification lifecycle |
+| records | Encrypted medical record references |
+| audit_logs | Security and clinical audit events |
+| patient_provider_consents | Patient-controlled provider access |
 
-The standard command is:
+## ⛓️ Blockchain
+
+The project includes Solidity contracts for medical record integrity and audit workflows.
+
+```bash
+npm run compile
+npm test
+npm run node
+npm run deploy:local
+```
+
+Blockchain should store **proofs and references**, not raw medical data.
+
+## 🧪 Quality checks
+
+Run the complete repository validation:
 
 ```bash
 npm run check
 ```
 
-It compiles and tests the Solidity contracts, runs backend syntax checks and Supertest integration tests, produces a Vite production build, and runs frontend Vitest coverage. The local deployment path is also verified with `npm run node` and `npm run deploy:local`.
+CI validates:
 
-## Security boundary
+- Solidity compilation
+- Smart contract tests
+- Backend syntax checks
+- Backend tests when configured
+- Frontend production build
+- Frontend tests
 
-Raw personally identifiable information is not included in the contracts. Real deployments require reviewed key management, audited contracts, a permissioned provider-verification process, HIPAA/GDPR controls, secure database persistence, rate limiting, signed authentication, monitoring, and a real IPFS pinning policy. Never commit `.env` files, private keys, clinical data, or generated build artifacts.
+## 🐳 Docker
 
-## Project layout
+```bash
+docker compose up --build
+```
 
-- `contracts/` contains the five Solidity modules.
-- `test/` contains contract coverage for registration, access, expiry, revocation, append-only records, and emergency logging.
-- `backend/` contains authenticated Express routes, a JSON persistence seam, encryption/IPFS integration, and an ethers chain service.
-- `frontend/` contains the routed React/Vite portal, real patient/doctor/emergency components, QR card, API client, and wallet connection.
-- `docs/` contains the architecture and API notes.
-- `.github/workflows/ci.yml` runs the complete validation command on pushes and pull requests.
+The Compose setup includes:
+
+- Backend
+- PostgreSQL
+- Database health checks
+
+## 🛣️ Request flow
+
+### Normal clinical access
+
+```
+Patient
+  │ grants consent
+  ▼
+Provider
+  │ must be VERIFIED
+  ▼
+Authorization middleware
+  │
+  ▼
+Encrypted record metadata
+  │
+  ├── PostgreSQL
+  ├── IPFS
+  └── Blockchain proof
+```
+
+## 📊 Project maturity
+
+### Strongly implemented
+- Frontend/backend architecture
+- Wallet identity flow
+- Provider lifecycle
+- Patient consent
+- Emergency workflow
+- Encryption foundation
+- PostgreSQL adapter
+- Smart contract modules
+- Docker foundation
+- CI workflow
+
+### Remaining before real clinical deployment
+- Independent smart contract audit
+- Institutional provider/license verification
+- Managed secrets/KMS
+- Migration version tracking
+- Backup and disaster recovery
+- Full E2E security testing
+- Observability/monitoring
+- HIPAA/GDPR/legal compliance
+- Clinical security review
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Run `npm run check`
+4. Open a pull request
+
+## 📄 License
+
+Add an appropriate license before commercial or clinical deployment.
+
+---
+
+## ⭐ Engineering principle
+
+> **Fast access should not require giving up privacy.**
+
+GoldenHour explores how encryption, patient consent, verified identities and auditable emergency access can work together in a modern healthcare system.
