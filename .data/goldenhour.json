@@ -1,0 +1,127 @@
+{
+  "patients": [
+    {
+      "id": "78d4568f-2a1b-4657-8496-328e5bd75e2b",
+      "wallet": "0xA9A65f72a90f4D4021CB56CC70f21D84fD444504",
+      "profile": {
+        "fullName": "John Doe",
+        "age": 34,
+        "gender": "Male",
+        "phone": "+1-555-0199"
+      },
+      "critical": {
+        "bloodGroup": "O+",
+        "allergies": [
+          "Penicillin",
+          "Peanuts"
+        ],
+        "conditions": [
+          "Asthma"
+        ],
+        "emergencyContact": "+1-555-0122"
+      },
+      "createdAt": "2026-09-16T19:31:37.783Z"
+    },
+    {
+      "id": "3c44cddb-2a1b-4657-8496-328e5bd75e2c",
+      "wallet": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "profile": {
+        "fullName": "John Doe",
+        "age": 34,
+        "gender": "Male",
+        "phone": "+1-555-0199"
+      },
+      "critical": {
+        "bloodGroup": "O+",
+        "allergies": [
+          "Penicillin",
+          "Peanuts"
+        ],
+        "conditions": [
+          "Asthma"
+        ],
+        "emergencyContact": "+1-555-0122"
+      },
+      "createdAt": "2026-09-16T19:31:37.783Z"
+    }
+  ],
+  "providers": [
+    {
+      "id": "7a985b0f-dde3-483c-b4fc-bec4fa394e56",
+      "wallet": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "name": "Dr. Marcus Vance, MD",
+      "licenseNumber": "MD-98421-CA",
+      "specialty": "Trauma & Emergency Care",
+      "status": "verified",
+      "verifiedBy": null,
+      "verifiedAt": null,
+      "createdAt": "2026-09-16T19:31:37.780Z"
+    },
+    {
+      "id": "70997970-dde3-483c-b4fc-bec4fa394e57",
+      "wallet": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      "name": "Dr. Marcus Vance, MD",
+      "licenseNumber": "MD-98421-CA",
+      "specialty": "Trauma & Emergency Care",
+      "status": "verified",
+      "verifiedBy": null,
+      "verifiedAt": null,
+      "createdAt": "2026-09-16T19:31:37.780Z"
+    }
+  ],
+  "records": [
+    {
+      "id": "31038f8e-0650-44d1-9604-1d26373fcbc8",
+      "patientId": "78d4568f-2a1b-4657-8496-328e5bd75e2b",
+      "recordType": "Consultation",
+      "doctorId": "7a985b0f-dde3-483c-b4fc-bec4fa394e56",
+      "doctorWallet": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "ipfsCid": "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco",
+      "encryptedHash": "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4",
+      "createdAt": "2026-09-16T19:31:37.785Z"
+    },
+    {
+      "id": "064ca32d-009c-455c-891c-aaaf20864b77",
+      "patientId": "78d4568f-2a1b-4657-8496-328e5bd75e2b",
+      "recordType": "Lab Results",
+      "doctorId": "7a985b0f-dde3-483c-b4fc-bec4fa394e56",
+      "doctorWallet": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "ipfsCid": "QmZ4tDuvesekSs4qM5ZBKpXiZGun7S2CYtEZRB3DYXkjGx",
+      "encryptedHash": "9b70c2b5e0b969a2444b9b9a24b9a24b9a24b9a24b9a24b9a24b9a24b9a24b9a",
+      "createdAt": "2026-09-16T19:31:37.786Z"
+    },
+    {
+      "id": "31038f8e-0650-44d1-9604-1d26373fcbc9",
+      "patientId": "3c44cddb-2a1b-4657-8496-328e5bd75e2c",
+      "recordType": "Consultation",
+      "doctorId": "70997970-dde3-483c-b4fc-bec4fa394e57",
+      "doctorWallet": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      "ipfsCid": "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco",
+      "encryptedHash": "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4",
+      "createdAt": "2026-09-16T19:31:37.785Z"
+    }
+  ],
+  "audit": [],
+  "consents": [
+    {
+      "id": "36e219d6-4b56-4348-bbf1-0ba94415ebc0",
+      "patientId": "78d4568f-2a1b-4657-8496-328e5bd75e2b",
+      "providerId": "7a985b0f-dde3-483c-b4fc-bec4fa394e56",
+      "scope": [
+        "records"
+      ],
+      "grantedAt": "2026-09-16T19:31:37.784Z",
+      "status": "active"
+    },
+    {
+      "id": "36e219d6-4b56-4348-bbf1-0ba94415ebc1",
+      "patientId": "3c44cddb-2a1b-4657-8496-328e5bd75e2c",
+      "providerId": "70997970-dde3-483c-b4fc-bec4fa394e57",
+      "scope": [
+        "records"
+      ],
+      "grantedAt": "2026-09-16T19:31:37.784Z",
+      "status": "active"
+    }
+  ]
+}

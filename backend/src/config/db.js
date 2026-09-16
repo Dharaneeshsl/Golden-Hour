@@ -98,6 +98,8 @@ function createPool() {
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : undefined,
     max: Number(process.env.DB_POOL_SIZE || 10),
+    idleTimeoutMillis: 10000,
+    connectionTimeoutMillis: 5000,
   });
 }
 
@@ -107,7 +109,19 @@ class PostgresStore {
   }
 
   async query(q, p = []) {
-    return this.pool.query(q, p);
+    try {
+      return await this.pool.query(q, p);
+    } catch (e) {
+      if (
+        e.message &&
+        (e.message.includes("Connection terminated") ||
+          e.message.includes("closed") ||
+          e.message.includes("reset"))
+      ) {
+        return await this.pool.query(q, p);
+      }
+      throw e;
+    }
   }
 
   async patientById(id) {
@@ -117,8 +131,14 @@ class PostgresStore {
   }
 
   async patientByWallet(wallet) {
-    const r = await this.query("SELECT * FROM patients WHERE lower(wallet)=lower($1)", [wallet]);
-    return normalizePatient(r.rows[0]);
+    try {
+      const r = await this.query("SELECT * FROM patients WHERE lower(wallet)=lower($1)", [wallet]);
+      if (r && r.rows && r.rows.length > 0) return normalizePatient(r.rows[0]);
+    } catch (e) {
+      console.warn("Postgres query failed, falling back to JsonStore for patientByWallet:", e.message);
+    }
+    const fallbackStore = new JsonStore();
+    return await fallbackStore.patientByWallet(wallet);
   }
 
   async allPatients() {
@@ -204,8 +224,14 @@ class PostgresStore {
   }
 
   async providerByWallet(wallet) {
-    const r = await this.query("SELECT * FROM providers WHERE lower(wallet)=lower($1)", [wallet]);
-    return normalizeProvider(r.rows[0]);
+    try {
+      const r = await this.query("SELECT * FROM providers WHERE lower(wallet)=lower($1)", [wallet]);
+      if (r && r.rows && r.rows.length > 0) return normalizeProvider(r.rows[0]);
+    } catch (e) {
+      console.warn("Postgres query failed, falling back to JsonStore for providerByWallet:", e.message);
+    }
+    const fallbackStore = new JsonStore();
+    return await fallbackStore.providerByWallet(wallet);
   }
 
   async providerById(id) {
@@ -521,8 +547,13 @@ async function createStore() {
     }
     return new JsonStore();
   }
-  await pool.query("SELECT 1");
-  return new PostgresStore(pool);
+  try {
+    await pool.query("SELECT 1");
+    return new PostgresStore(pool);
+  } catch (err) {
+    console.error("Warning: PostgreSQL database connection failed, falling back to JsonStore:", err.message);
+    return new JsonStore();
+  }
 }
 
 module.exports = {

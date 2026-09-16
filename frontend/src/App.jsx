@@ -10,7 +10,7 @@ import WalletConnectButton from "./components/WalletConnectButton";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { setToken } from "./api";
 
-function Home() {
+function Home({ user }) {
   return (
     <section className="hero">
       <div>
@@ -20,7 +20,17 @@ function Home() {
           Encrypted records, wallet-verified authentication, patient-controlled access, and immutable audit trails.
         </p>
         <div className="hero-actions">
-          <Link className="primary" to="/login">Secure Sign In</Link>
+          {!user ? (
+            <Link className="primary" to="/login">Sign In / Register</Link>
+          ) : user.role === "admin" ? (
+            <Link className="primary" to="/admin">Go to Admin Portal</Link>
+          ) : user.role === "doctor" ? (
+            <Link className="primary" to="/doctor">Go to Provider Portal</Link>
+          ) : (
+            <Link className="primary" to={user.patientId ? "/patient/me" : "/onboarding"}>
+              {user.patientId ? "Go to Patient Portal" : "Complete Patient Onboarding"}
+            </Link>
+          )}
           <Link className="secondary" to="/emergency">Emergency Access</Link>
         </div>
       </div>
@@ -31,8 +41,26 @@ function Home() {
 function PatientRoute({ user }) {
   const { id } = useParams();
   if (!user) return <Navigate to="/login" replace />;
+  if (user.role === "doctor") return <Navigate to="/doctor" replace />;
+  if (user.role === "admin") return <Navigate to="/admin" replace />;
   if (id === "me" && !user.patientId) return <Navigate to="/onboarding" replace />;
   return <PatientDashboard patientId={id === "me" ? user.patientId : id} wallet={user.wallet} />;
+}
+
+function DoctorRoute({ user }) {
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role !== "doctor" && user.role !== "admin") {
+    return <Navigate to={user.patientId ? "/patient/me" : "/onboarding"} replace />;
+  }
+  return <DoctorDashboard wallet={user.wallet} />;
+}
+
+function AdminRoute({ user }) {
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role !== "admin") {
+    return <Navigate to={user.role === "doctor" ? "/doctor" : user.patientId ? "/patient/me" : "/login"} replace />;
+  }
+  return <AdminDashboard />;
 }
 
 function EmergencyRoute() {
@@ -51,8 +79,28 @@ export default function App() {
       logout();
     };
     window.addEventListener("goldenhour_session_expired", handleExpired);
-    return () => window.removeEventListener("goldenhour_session_expired", handleExpired);
-  }, []);
+
+    const handleAccountsChanged = (accounts) => {
+      if (user && accounts && accounts.length > 0) {
+        const newAddress = accounts[0].toLowerCase();
+        const currentAddress = (user.wallet || "").toLowerCase();
+        if (newAddress !== currentAddress) {
+          logout();
+        }
+      }
+    };
+
+    if (window.ethereum) {
+      window.ethereum.on("accountsChanged", handleAccountsChanged);
+    }
+
+    return () => {
+      window.removeEventListener("goldenhour_session_expired", handleExpired);
+      if (window.ethereum && window.ethereum.removeListener) {
+        window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
+      }
+    };
+  }, [user]);
 
   const login = (next) => {
     localStorage.setItem("goldenhour_user", JSON.stringify(next));
@@ -80,17 +128,37 @@ export default function App() {
             </div>
           </Link>
           <nav>
-            {user?.role === "admin" && <Link to="/admin">Admin Portal</Link>}
-            {user && (user.patientId || user.role === "patient") && (
-              <Link to="/patient/me">Patient Portal</Link>
+            {user?.role === "admin" && (
+              <Link to="/admin">🔑 Admin Portal</Link>
             )}
-            {user && (user.role === "doctor" || user.role === "admin") && (
-              <Link to="/doctor">Provider Portal</Link>
+            {user?.role === "doctor" && (
+              <Link to="/doctor">🩺 Provider Portal</Link>
             )}
-            <Link to="/emergency">Emergency Access</Link>
+            {user?.role === "patient" && (
+              user.patientId ? (
+                <Link to="/patient/me">👤 Patient Portal</Link>
+              ) : (
+                <Link to="/onboarding" style={{ color: "#10b981", fontWeight: "bold" }}>
+                  📝 Complete Onboarding
+                </Link>
+              )
+            )}
+            {user?.role === "unregistered" && (
+              <Link to="/onboarding" style={{ color: "#10b981", fontWeight: "bold" }}>
+                📝 Account Onboarding
+              </Link>
+            )}
+            <Link to="/emergency">🚨 Emergency Access</Link>
           </nav>
           {user ? (
-            <button className="wallet" onClick={logout}>Sign Out</button>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              <span className="badge" style={{ textTransform: "uppercase", fontSize: "0.75rem" }}>
+                {user.role}
+              </span>
+              <button className="logout-btn" onClick={logout}>
+                🚪 Logout
+              </button>
+            </div>
           ) : (
             <WalletConnectButton onConnected={() => navigate("/login")} />
           )}
@@ -98,21 +166,35 @@ export default function App() {
 
         <main>
           <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/login" element={<Login onLogin={login} />} />
+            <Route path="/" element={<Home user={user} />} />
+            <Route
+              path="/login"
+              element={
+                user ? (
+                  <Navigate
+                    to={
+                      user.role === "admin"
+                        ? "/admin"
+                        : user.role === "doctor"
+                        ? "/doctor"
+                        : user.patientId
+                        ? "/patient/me"
+                        : "/onboarding"
+                    }
+                    replace
+                  />
+                ) : (
+                  <Login onLogin={login} />
+                )
+              }
+            />
             <Route
               path="/onboarding"
               element={user ? <PatientOnboarding onComplete={complete} /> : <Navigate to="/login" />}
             />
             <Route path="/patient/:id" element={<PatientRoute user={user} />} />
-            <Route
-              path="/doctor"
-              element={user ? <DoctorDashboard wallet={user.wallet} /> : <Navigate to="/login" />}
-            />
-            <Route
-              path="/admin"
-              element={user?.role === "admin" ? <AdminDashboard /> : <Navigate to="/login" />}
-            />
+            <Route path="/doctor" element={<DoctorRoute user={user} />} />
+            <Route path="/admin" element={<AdminRoute user={user} />} />
             <Route path="/emergency" element={<EmergencyRoute />} />
             <Route path="/emergency/:id" element={<EmergencyRoute />} />
           </Routes>

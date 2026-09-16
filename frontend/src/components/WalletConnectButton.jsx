@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useContract } from "../hooks/useContract";
 import { shortenAddress } from "../utils/web3";
 
@@ -6,6 +6,34 @@ export default function WalletConnectButton({ onConnected }) {
   const [address, setAddress] = useState("");
   const [error, setError] = useState("");
   const { connect } = useContract();
+
+  useEffect(() => {
+    if (window.ethereum) {
+      window.ethereum.request({ method: "eth_accounts" }).then((accounts) => {
+        if (accounts && accounts[0]) {
+          setAddress(accounts[0]);
+          onConnected?.(accounts[0]);
+        }
+      }).catch(console.error);
+
+      const handleAccountsChanged = (accounts) => {
+        if (accounts && accounts.length > 0) {
+          setAddress(accounts[0]);
+          onConnected?.(accounts[0]);
+        } else {
+          setAddress("");
+          onConnected?.("");
+        }
+      };
+
+      window.ethereum.on("accountsChanged", handleAccountsChanged);
+      return () => {
+        if (window.ethereum.removeListener) {
+          window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
+        }
+      };
+    }
+  }, []);
 
   const handle = async () => {
     setError("");
@@ -29,11 +57,29 @@ export default function WalletConnectButton({ onConnected }) {
     }
   };
 
+  const disconnect = (e) => {
+    e.stopPropagation();
+    setAddress("");
+    onConnected?.("");
+  };
+
   return (
     <div>
-      <button className="wallet" onClick={handle}>
-        {address ? `Connected: ${shortenAddress(address)}` : "Connect MetaMask Wallet"}
-      </button>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <button className="wallet" onClick={handle}>
+          {address ? `Connected: ${shortenAddress(address)}` : "Connect MetaMask Wallet"}
+        </button>
+        {address && (
+          <button
+            type="button"
+            className="secondary"
+            style={{ fontSize: "0.75rem", padding: "8px 12px" }}
+            onClick={disconnect}
+          >
+            Disconnect
+          </button>
+        )}
+      </div>
       {error && <small className="error" style={{ color: "#ef4444", display: "block", marginTop: "0.5rem" }}>{error}</small>}
     </div>
   );
