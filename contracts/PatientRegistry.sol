@@ -6,29 +6,30 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 /// @title PatientRegistry
 /// @notice Maps a wallet to a pseudonymous patient identity and encrypted-data hashes.
 contract PatientRegistry is Ownable {
-    struct Patient {
-        uint256 id;
-        bytes32 basicInfoHash;
-        bytes32 criticalInfoHash;
-        uint64 registeredAt;
-        bool active;
-    }
-
+    struct Patient { uint256 id; bytes32 basicInfoHash; bytes32 criticalInfoHash; uint64 registeredAt; bool active; }
     uint256 private _nextPatientId = 1;
     mapping(address => Patient) private _patients;
     mapping(uint256 => address) private _patientOwner;
-
     event PatientRegistered(uint256 indexed patientId, address indexed patient, bytes32 basicInfoHash);
     event PatientHashesUpdated(uint256 indexed patientId, bytes32 basicInfoHash, bytes32 criticalInfoHash);
 
     constructor(address initialOwner) Ownable(initialOwner) {}
 
     function registerPatient(bytes32 basicInfoHash, bytes32 criticalInfoHash) external returns (uint256 patientId) {
-        require(_patients[msg.sender].id == 0, "Already registered");
+        return _register(msg.sender, basicInfoHash, criticalInfoHash);
+    }
+
+    function registerPatientFor(address patient, bytes32 basicInfoHash, bytes32 criticalInfoHash) external onlyOwner returns (uint256 patientId) {
+        return _register(patient, basicInfoHash, criticalInfoHash);
+    }
+
+    function _register(address patient, bytes32 basicInfoHash, bytes32 criticalInfoHash) internal returns (uint256 patientId) {
+        require(patient != address(0), "Invalid patient");
+        require(_patients[patient].id == 0, "Already registered");
         patientId = _nextPatientId++;
-        _patients[msg.sender] = Patient(patientId, basicInfoHash, criticalInfoHash, uint64(block.timestamp), true);
-        _patientOwner[patientId] = msg.sender;
-        emit PatientRegistered(patientId, msg.sender, basicInfoHash);
+        _patients[patient] = Patient(patientId, basicInfoHash, criticalInfoHash, uint64(block.timestamp), true);
+        _patientOwner[patientId] = patient;
+        emit PatientRegistered(patientId, patient, basicInfoHash);
     }
 
     function updateHashes(bytes32 basicInfoHash, bytes32 criticalInfoHash) external {
@@ -40,10 +41,6 @@ contract PatientRegistry is Ownable {
     }
 
     function getPatientId(address wallet) external view returns (uint256) { return _patients[wallet].id; }
-    function getPatient(uint256 patientId) external view returns (Patient memory) {
-        address wallet = _patientOwner[patientId];
-        require(wallet != address(0), "Patient not found");
-        return _patients[wallet];
-    }
+    function getPatient(uint256 patientId) external view returns (Patient memory) { address wallet = _patientOwner[patientId]; require(wallet != address(0), "Patient not found"); return _patients[wallet]; }
     function ownerOfPatient(uint256 patientId) external view returns (address) { return _patientOwner[patientId]; }
 }
