@@ -5,6 +5,7 @@ const registryAbi = [
   "function registerPatientFor(address,bytes32,bytes32) returns (uint256)",
   "function getPatientId(address) view returns (uint256)",
   "function updateHashes(bytes32,bytes32)",
+  "function updateHashesFor(address,bytes32,bytes32)",
 ];
 const accessAbi = [
   "function setProviderVerified(address,bool)",
@@ -30,7 +31,6 @@ class ChainService {
   constructor(options = {}) {
     this.config = { ...config, ...options };
     
-    // Strict validation: Require RPC, private key, and registry address to enable
     this.enabled = Boolean(
       this.config.rpcUrl &&
         this.config.backendPrivateKey &&
@@ -63,9 +63,9 @@ class ChainService {
     return { mode: "chain", txHash: tx.hash, receipt, patientId: await this.patientId(wallet) };
   }
 
-  async updatePatientHashes(profile, critical) {
+  async updatePatientHashes(patientWallet, profile, critical) {
     if (!this.enabled || !this.registry) return { mode: "memory", status: "chain-not-configured" };
-    const tx = await this.registry.updateHashes(hashText(profile), hashText(critical));
+    const tx = await this.registry.updateHashesFor(patientWallet, hashText(profile), hashText(critical));
     return { mode: "chain", txHash: tx.hash, receipt: await tx.wait() };
   }
 

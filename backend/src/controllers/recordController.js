@@ -1,6 +1,23 @@
 const crypto = require("crypto");
 const { canonicalizeWallet } = require("../config/db");
 
+function canonicalJsonStringify(obj) {
+  if (obj === null || typeof obj !== "object") {
+    return JSON.stringify(obj);
+  }
+  if (Array.isArray(obj)) {
+    return "[" + obj.map(canonicalJsonStringify).join(",") + "]";
+  }
+  const keys = Object.keys(obj).sort();
+  return (
+    "{" +
+    keys
+      .map((k) => JSON.stringify(k) + ":" + canonicalJsonStringify(obj[k]))
+      .join(",") +
+    "}"
+  );
+}
+
 function createRecordController({ store, encryption, ipfs, chain }) {
   const canRead = async (req, patient) => {
     const reqWallet = canonicalizeWallet(req.user.wallet);
@@ -48,7 +65,7 @@ function createRecordController({ store, encryption, ipfs, chain }) {
 
         const rawHash = crypto
           .createHash("sha256")
-          .update(JSON.stringify(encrypted))
+          .update(canonicalJsonStringify(encrypted))
           .digest("hex");
         const bytes32Hash = `0x${rawHash}`;
 
@@ -127,10 +144,9 @@ function createRecordController({ store, encryption, ipfs, chain }) {
       try {
         const encrypted = await ipfs.fetchEncrypted(record.ipfsCid);
 
-        // Integrity verification before decryption
         const computedHash = crypto
           .createHash("sha256")
-          .update(JSON.stringify(encrypted))
+          .update(canonicalJsonStringify(encrypted))
           .digest("hex");
 
         if (computedHash !== record.encryptedHash) {
@@ -148,4 +164,4 @@ function createRecordController({ store, encryption, ipfs, chain }) {
   };
 }
 
-module.exports = { createRecordController };
+module.exports = { createRecordController, canonicalJsonStringify };

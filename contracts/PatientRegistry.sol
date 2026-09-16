@@ -33,7 +33,15 @@ contract PatientRegistry is Ownable {
     }
 
     function updateHashes(bytes32 basicInfoHash, bytes32 criticalInfoHash) external {
-        Patient storage patient = _patients[msg.sender];
+        _updateHashes(msg.sender, basicInfoHash, criticalInfoHash);
+    }
+
+    function updateHashesFor(address patient, bytes32 basicInfoHash, bytes32 criticalInfoHash) external onlyOwner {
+        _updateHashes(patient, basicInfoHash, criticalInfoHash);
+    }
+
+    function _updateHashes(address patientWallet, bytes32 basicInfoHash, bytes32 criticalInfoHash) internal {
+        Patient storage patient = _patients[patientWallet];
         require(patient.id != 0 && patient.active, "Patient not found");
         patient.basicInfoHash = basicInfoHash;
         patient.criticalInfoHash = criticalInfoHash;

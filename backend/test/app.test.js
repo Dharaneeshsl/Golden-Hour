@@ -1,14 +1,230 @@
-process.env.JWT_SECRET="test-secret";
-const os=require("os"),path=require("path"),test=require("node:test"),assert=require("node:assert/strict"),request=require("supertest"),jwt=require("jsonwebtoken");const{createApp}=require("../src/app");const{JsonStore}=require("../src/config/db");
-const patientWallet="0x0000000000000000000000000000000000000001",doctorWallet="0x0000000000000000000000000000000000000002",adminWallet="0x0000000000000000000000000000000000000003";
-const token=(wallet,role)=>jwt.sign({wallet,role},process.env.JWT_SECRET,{issuer:"goldenhour"});const auth=w=>({Authorization:`Bearer ${token(w,w===adminWallet?"admin":w===doctorWallet?"doctor":"patient")}`});
-async function app(){const store=new JsonStore(path.join(os.tmpdir(),`goldenhour-${Date.now()}-${Math.random()}.json`));return{server:await createApp({store,encryption:{encryptJson:x=>({version:1,algorithm:"aes-256-gcm",iv:"a",tag:"b",ciphertext:Buffer.from(JSON.stringify(x)).toString("base64")}),decryptJson:x=>JSON.parse(Buffer.from(x.ciphertext,"base64").toString())},ipfs:{uploadEncrypted:async p=>({cid:`cid${Date.now()}${Math.random()}`,persisted:true}),fetchEncrypted:async()=>({version:1,algorithm:"aes-256-gcm",iv:"a",tag:"b",ciphertext:Buffer.from(JSON.stringify({diagnosis:"stable"})).toString("base64")})}}),store};}
-async function setupClinical(){const ctx=await app();const{server}=ctx;const patient=await request(server).post("/api/patients").set(auth(patientWallet)).send({profile:{name:"Test"},critical:{bloodGroup:"O+",allergies:["penicillin"]}});await request(server).post("/api/doctors/register").set(auth(doctorWallet)).send({name:"Dr Test",licenseNumber:"LIC-1",specialty:"Emergency"});await request(server).post(`/api/doctors/${doctorWallet}/verify`).set(auth(adminWallet));return{...ctx,patientId:patient.body.id};}
-test("health is public",async()=>{const{server}=await app();const r=await request(server).get("/health");assert.equal(r.status,200);assert.equal(r.body.status,"ok")});
-test("patient registration and current-user resolution work",async()=>{const{server}=await app();const r=await request(server).post("/api/patients").set(auth(patientWallet)).send({profile:{name:"Test"},critical:{bloodGroup:"O+"}});assert.equal(r.status,201);const me=await request(server).get("/api/patients/me").set(auth(patientWallet));assert.equal(me.status,200);assert.equal(me.body.patientId,r.body.id)});
-test("provider registration and admin verification work",async()=>{const{server}=await app();const created=await request(server).post("/api/doctors/register").set(auth(doctorWallet)).send({name:"Dr Test",licenseNumber:"LIC-1",specialty:"Emergency"});assert.equal(created.status,201);const verify=await request(server).post(`/api/doctors/${doctorWallet}/verify`).set(auth(adminWallet));assert.equal(verify.status,200);assert.equal(verify.body.status,"verified");const list=await request(server).get("/api/doctors?status=verified").set(auth(adminWallet));assert.equal(list.status,200);assert.equal(list.body.length,1)});
-test("consent grant, provider enrichment and revoke work",async()=>{const{server,patientId}=await setupClinical();const grant=await request(server).post(`/api/consents/${patientId}`).set(auth(patientWallet)).send({wallet:doctorWallet});assert.equal(grant.status,201);assert.equal(grant.body.providerWallet,doctorWallet);const list=await request(server).get(`/api/consents/${patientId}`).set(auth(adminWallet));assert.equal(list.status,200);assert.equal(list.body[0].providerWallet,doctorWallet);const revoke=await request(server).post(`/api/consents/${patientId}/revoke`).set(auth(patientWallet)).send({wallet:doctorWallet});assert.equal(revoke.status,200);assert.equal(revoke.body.status,"revoked")});
-test("consent gates record creation and doctor can read/decrypt consented records",async()=>{const{server,patientId}=await setupClinical();const denied=await request(server).post("/api/records").set(auth(doctorWallet)).send({patientId,recordType:"Consultation",clinicalData:{x:1}});assert.equal(denied.status,403);await request(server).post(`/api/consents/${patientId}`).set(auth(patientWallet)).send({wallet:doctorWallet});const created=await request(server).post("/api/records").set(auth(doctorWallet)).send({patientId,recordType:"Consultation",clinicalData:{diagnosis:"stable"}});assert.equal(created.status,201);const list=await request(server).get(`/api/records/${patientId}`).set(auth(doctorWallet));assert.equal(list.status,200);assert.equal(list.body.length,1);const detail=await request(server).get(`/api/records/${patientId}/${created.body.id}`).set(auth(doctorWallet));assert.equal(detail.status,200);assert.equal(detail.body.clinicalData.diagnosis,"stable")});
-test("emergency access is time-bounded and admin can audit",async()=>{const{server,store,patientId}=await setupClinical();const emergency=await request(server).post("/api/emergency-access").set(auth(doctorWallet)).send({patientId,justification:"Immediate trauma assessment requires critical history"});assert.equal(emergency.status,200);assert.ok(emergency.body.expiresAt);const critical=await request(server).get(`/api/emergency-access/critical/${emergency.body.accessId}`).set(auth(doctorWallet));assert.equal(critical.status,200);const audit=await request(server).get(`/api/emergency-access/${patientId}`).set(auth(adminWallet));assert.equal(audit.status,200);const event=await store.auditById(emergency.body.accessId);event.expiresAt=new Date(Date.now()-1000).toISOString();await store.save(event);const expired=await request(server).get(`/api/emergency-access/critical/${emergency.body.accessId}`).set(auth(doctorWallet));assert.equal(expired.status,410)});
-test("admin patient oversight bypass works while ordinary users remain isolated",async()=>{const{server,patientId}=await setupClinical();const other=await request(server).get(`/api/patients/${patientId}`).set(auth(doctorWallet));assert.equal(other.status,403);const admin=await request(server).get(`/api/patients/${patientId}`).set(auth(adminWallet));assert.equal(admin.status,200)});
-test("protected routes reject missing auth",async()=>{const{server}=await app();assert.equal((await request(server).post("/api/records").send({})).status,401)});
+process.env.JWT_SECRET = "test-secret";
+process.env.ADMIN_WALLETS = "0x0000000000000000000000000000000000000003,0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+
+const os = require("os");
+const path = require("path");
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const request = require("supertest");
+const jwt = require("jsonwebtoken");
+const { createApp } = require("../src/app");
+const { JsonStore } = require("../src/config/db");
+
+const patientWallet = "0x0000000000000000000000000000000000000001";
+const doctorWallet = "0x0000000000000000000000000000000000000002";
+const adminWallet = "0x0000000000000000000000000000000000000003";
+
+const token = (wallet, role) =>
+  jwt.sign({ wallet, role }, process.env.JWT_SECRET, { issuer: "goldenhour" });
+
+const auth = (w) => ({
+  Authorization: `Bearer ${token(
+    w,
+    w === adminWallet ? "admin" : w === doctorWallet ? "doctor" : "patient"
+  )}`,
+});
+
+async function app() {
+  const store = new JsonStore(
+    path.join(os.tmpdir(), `goldenhour-${Date.now()}-${Math.random()}.json`)
+  );
+  return {
+    server: await createApp({
+      store,
+      encryption: {
+        encryptJson: (x) => ({
+          version: 1,
+          algorithm: "aes-256-gcm",
+          iv: "a",
+          tag: "b",
+          ciphertext: Buffer.from(JSON.stringify(x)).toString("base64"),
+        }),
+        decryptJson: (x) => JSON.parse(Buffer.from(x.ciphertext, "base64").toString()),
+      },
+      ipfs: {
+        uploadEncrypted: async () => ({
+          cid: `cid${Date.now()}${Math.random()}`,
+          persisted: true,
+        }),
+        fetchEncrypted: async () => ({
+          version: 1,
+          algorithm: "aes-256-gcm",
+          iv: "a",
+          tag: "b",
+          ciphertext: Buffer.from(JSON.stringify({ diagnosis: "stable" })).toString("base64"),
+        }),
+      },
+    }),
+    store,
+  };
+}
+
+async function setupClinical() {
+  const ctx = await app();
+  const { server } = ctx;
+  const patient = await request(server)
+    .post("/api/patients")
+    .set(auth(patientWallet))
+    .send({
+      profile: { name: "Test" },
+      critical: { bloodGroup: "O+", allergies: ["penicillin"] },
+    });
+
+  await request(server)
+    .post("/api/doctors/register")
+    .set(auth(doctorWallet))
+    .send({ name: "Dr Test", licenseNumber: "LIC-1", specialty: "Emergency" });
+
+  await request(server)
+    .post(`/api/doctors/${doctorWallet}/verify`)
+    .set(auth(adminWallet));
+
+  return { ...ctx, patientId: patient.body.id };
+}
+
+test("health is public", async () => {
+  const { server } = await app();
+  const r = await request(server).get("/health");
+  assert.equal(r.status, 200);
+  assert.equal(r.body.status, "ok");
+});
+
+test("patient registration and current-user resolution work", async () => {
+  const { server } = await app();
+  const r = await request(server)
+    .post("/api/patients")
+    .set(auth(patientWallet))
+    .send({ profile: { name: "Test" }, critical: { bloodGroup: "O+" } });
+  assert.equal(r.status, 201);
+  const me = await request(server)
+    .get("/api/patients/me")
+    .set(auth(patientWallet));
+  assert.equal(me.status, 200);
+  assert.equal(me.body.patientId, r.body.id);
+});
+
+test("provider registration and admin verification work", async () => {
+  const { server } = await app();
+  const created = await request(server)
+    .post("/api/doctors/register")
+    .set(auth(doctorWallet))
+    .send({ name: "Dr Test", licenseNumber: "LIC-1", specialty: "Emergency" });
+  assert.equal(created.status, 201);
+
+  const verify = await request(server)
+    .post(`/api/doctors/${doctorWallet}/verify`)
+    .set(auth(adminWallet));
+  assert.equal(verify.status, 200);
+  assert.equal(verify.body.status, "verified");
+
+  const list = await request(server)
+    .get("/api/doctors?status=verified")
+    .set(auth(adminWallet));
+  assert.equal(list.status, 200);
+  assert.equal(list.body.length, 1);
+});
+
+test("consent grant, provider enrichment and revoke work", async () => {
+  const { server, patientId } = await setupClinical();
+  const grant = await request(server)
+    .post(`/api/consents/${patientId}`)
+    .set(auth(patientWallet))
+    .send({ wallet: doctorWallet });
+  assert.equal(grant.status, 201);
+  assert.equal(grant.body.providerWallet, doctorWallet);
+
+  const list = await request(server)
+    .get(`/api/consents/${patientId}`)
+    .set(auth(adminWallet));
+  assert.equal(list.status, 200);
+  assert.equal(list.body[0].providerWallet, doctorWallet);
+
+  const revoke = await request(server)
+    .post(`/api/consents/${patientId}/revoke`)
+    .set(auth(patientWallet))
+    .send({ wallet: doctorWallet });
+  assert.equal(revoke.status, 200);
+  assert.equal(revoke.body.status, "revoked");
+});
+
+test("consent gates record creation and doctor can read/decrypt consented records", async () => {
+  const { server, patientId } = await setupClinical();
+  const denied = await request(server)
+    .post("/api/records")
+    .set(auth(doctorWallet))
+    .send({ patientId, recordType: "Consultation", clinicalData: { x: 1 } });
+  assert.equal(denied.status, 403);
+
+  await request(server)
+    .post(`/api/consents/${patientId}`)
+    .set(auth(patientWallet))
+    .send({ wallet: doctorWallet });
+
+  const created = await request(server)
+    .post("/api/records")
+    .set(auth(doctorWallet))
+    .send({ patientId, recordType: "Consultation", clinicalData: { diagnosis: "stable" } });
+  assert.equal(created.status, 201);
+
+  const list = await request(server)
+    .get(`/api/records/${patientId}`)
+    .set(auth(doctorWallet));
+  assert.equal(list.status, 200);
+  assert.equal(list.body.length, 1);
+
+  const detail = await request(server)
+    .get(`/api/records/${patientId}/${created.body.id}`)
+    .set(auth(doctorWallet));
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.clinicalData.diagnosis, "stable");
+});
+
+test("emergency access is time-bounded and admin can audit", async () => {
+  const { server, store, patientId } = await setupClinical();
+  const emergency = await request(server)
+    .post("/api/emergency-access")
+    .set(auth(doctorWallet))
+    .send({
+      patientId,
+      justification: "Immediate trauma assessment requires critical history",
+    });
+  assert.equal(emergency.status, 200);
+  assert.ok(emergency.body.expiresAt);
+
+  const critical = await request(server)
+    .get(`/api/emergency-access/critical/${emergency.body.accessId}`)
+    .set(auth(doctorWallet));
+  assert.equal(critical.status, 200);
+
+  const audit = await request(server)
+    .get(`/api/emergency-access/${patientId}`)
+    .set(auth(adminWallet));
+  assert.equal(audit.status, 200);
+
+  const event = await store.auditById(emergency.body.accessId);
+  event.expiresAt = new Date(Date.now() - 1000).toISOString();
+  await store.save();
+
+  const expired = await request(server)
+    .get(`/api/emergency-access/critical/${emergency.body.accessId}`)
+    .set(auth(doctorWallet));
+  assert.equal(expired.status, 410);
+});
+
+test("admin patient oversight bypass works while ordinary users remain isolated", async () => {
+  const { server, patientId } = await setupClinical();
+  const other = await request(server)
+    .get(`/api/patients/${patientId}`)
+    .set(auth(doctorWallet));
+  assert.equal(other.status, 403);
+
+  const admin = await request(server)
+    .get(`/api/patients/${patientId}`)
+    .set(auth(adminWallet));
+  assert.equal(admin.status, 200);
+});
+
+test("protected routes reject missing auth", async () => {
+  const { server } = await app();
+  assert.equal((await request(server).post("/api/records").send({})).status, 401);
+});

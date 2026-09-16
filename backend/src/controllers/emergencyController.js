@@ -18,7 +18,6 @@ function createEmergencyController({ store, chain }) {
           .json({ error: "A detailed justification of at least 10 characters is required" });
       }
 
-      // Re-verify provider active status
       if (req.provider && req.provider.status !== "verified") {
         return res.status(403).json({ error: "Provider account is not active or verified" });
       }
@@ -43,15 +42,15 @@ function createEmergencyController({ store, chain }) {
           actor: canonicalizeWallet(req.provider.wallet),
           action: "EMERGENCY_BREAK_GLASS",
           providerId: req.provider.id,
-          metadata: { justification: justification.trim(), scope: "CRITICAL_ONLY" },
+          metadata: { scope: "CRITICAL_ONLY" },
           expiresAt,
           timestamp: new Date().toISOString(),
         });
 
+        // Expose access token metadata without revealing un-audited critical data
         res.json({
           accessId: event.id,
           patientId,
-          critical: patient.critical,
           expiresAt,
           audit: event,
         });
@@ -68,7 +67,8 @@ function createEmergencyController({ store, chain }) {
           return res.status(404).json({ error: "Emergency access event not found" });
         }
 
-        if (new Date(event.expiresAt).getTime() <= Date.now()) {
+        const expiresAtTime = new Date(event.expiresAt).getTime();
+        if (isNaN(expiresAtTime) || expiresAtTime <= Date.now()) {
           return res.status(410).json({ error: "Emergency access window has expired" });
         }
 
@@ -82,21 +82,21 @@ function createEmergencyController({ store, chain }) {
           return res.status(403).json({ error: "Emergency access denied" });
         }
 
-        // Check if provider is currently suspended
+        let provider = null;
         if (req.user.role !== "admin") {
-          const provider = await store.providerByWallet(requestorWallet);
+          provider = await store.providerByWallet(requestorWallet);
           if (!provider || provider.status !== "verified") {
             return res.status(403).json({ error: "Provider status is no longer verified or active" });
           }
         }
 
-        // Log every view of the critical medical payload for audit trail integrity
+        // Log every view of the critical medical payload with proper providerId
         await store.addAudit({
           id: crypto.randomUUID(),
           patientId: patient.id,
           actor: requestorWallet,
           action: "EMERGENCY_CRITICAL_VIEW",
-          providerId: req.user.role !== "admin" ? req.provider?.id : null,
+          providerId: provider ? provider.id : null,
           metadata: { accessId: req.params.accessId },
           timestamp: new Date().toISOString(),
         });

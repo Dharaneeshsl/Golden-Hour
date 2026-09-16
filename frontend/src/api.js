@@ -18,6 +18,11 @@ export async function request(path, options = {}) {
   const data = await r.json().catch(() => ({}));
 
   if (!r.ok) {
+    if (r.status === 401 && path !== "/api/auth/verify") {
+      setToken(null);
+      localStorage.removeItem("goldenhour_user");
+      window.dispatchEvent(new Event("goldenhour_session_expired"));
+    }
     const error = new Error(data.error || `Request failed: ${r.status}`);
     error.status = r.status;
     error.code = data.code;

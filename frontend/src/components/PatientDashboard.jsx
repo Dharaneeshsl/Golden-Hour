@@ -4,7 +4,7 @@ import QRCodeCard from "./QRCodeCard";
 import RecordTimeline from "./RecordTimeline";
 import ConsentManager from "./ConsentManager";
 
-export default function PatientDashboard({ patientId = "1", wallet = "" }) {
+export default function PatientDashboard({ patientId = "", wallet = "" }) {
   const [patient, setPatient] = useState(null);
   const [records, setRecords] = useState([]);
   const [audit, setAudit] = useState([]);
@@ -20,6 +20,7 @@ export default function PatientDashboard({ patientId = "1", wallet = "" }) {
   const [busy, setBusy] = useState(false);
 
   const load = () => {
+    if (!patientId) return;
     let active = true;
     api
       .patient(patientId)

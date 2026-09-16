@@ -82,7 +82,7 @@ function createPatientController({ store, chain }) {
         const updated = await store.updatePatient(patient.id, { profile, critical });
 
         if (chain.enabled) {
-          await chain.updatePatientHashes(updated.profile, updated.critical);
+          await chain.updatePatientHashes(patient.wallet, updated.profile, updated.critical);
         }
 
         await store.addAudit({

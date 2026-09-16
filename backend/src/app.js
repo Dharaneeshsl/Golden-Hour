@@ -47,18 +47,23 @@ async function createApp({
     helmet(),
     cors({
       origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV !== "production") {
-          callback(null, true);
-        } else {
-          callback(new Error("CORS policy restriction"));
+        // Bug #9 Fix: Do not allow missing origin in production
+        if (!origin) {
+          if (process.env.NODE_ENV === "production") {
+            return callback(new Error("CORS policy restriction: Origin header required in production"));
+          }
+          return callback(null, true);
         }
+        if (allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+        callback(new Error("CORS policy restriction: Origin not allowed"));
       },
       credentials: true,
     }),
     express.json({ limit: "256kb" })
   );
 
-  // Global rate limiter
   app.use(
     "/api",
     rateLimit({
@@ -69,7 +74,6 @@ async function createApp({
     })
   );
 
-  // Stricter rate limiter specifically for authentication nonces & signature verification
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 60,
@@ -87,13 +91,16 @@ async function createApp({
 
   app.get("/ready", async (_q, s) => {
     try {
-      if (store.query) await store.query("SELECT 1");
+      if (store.query) {
+        // Bug #31 Fix: Verify migration table exists in database
+        await store.query("SELECT filename FROM schema_migrations LIMIT 1");
+      }
       s.json({
         status: "ready",
         database: process.env.DATABASE_URL ? "postgres" : "local",
       });
     } catch (e) {
-      s.status(503).json({ status: "not_ready" });
+      s.status(503).json({ status: "not_ready", error: "Database or schema migrations not ready" });
     }
   });
 

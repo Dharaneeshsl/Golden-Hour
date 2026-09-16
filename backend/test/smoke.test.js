@@ -1,3 +1,15 @@
-const test=require("node:test");const assert=require("node:assert/strict");
-test("health contract",()=>{assert.equal(typeof "ok","string")});
-test("emergency window is bounded",()=>{const expires=Date.now()+15*60*1000;assert.ok(expires>Date.now());assert.ok(expires-Date.now()<=15*60*1000)});
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const request = require("supertest");
+const { createApp } = require("../src/app");
+const { JsonStore } = require("../src/config/db");
+
+test("Express application initializes cleanly and responds to health checks", async () => {
+  const store = new JsonStore();
+  const app = await createApp({ store });
+  assert.ok(app);
+
+  const res = await request(app).get("/health");
+  assert.equal(res.status, 200);
+  assert.equal(res.body.status, "ok");
+});

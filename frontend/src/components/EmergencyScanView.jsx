@@ -8,10 +8,18 @@ export default function EmergencyScanView({ initialPatientId = "" }) {
   );
   const [accessGrant, setAccessGrant] = useState(null);
   const [criticalData, setCriticalData] = useState(null);
+  const [expired, setExpired] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const token = getToken();
+
+  const resetSession = () => {
+    setAccessGrant(null);
+    setCriticalData(null);
+    setExpired(false);
+    setError("");
+  };
 
   const submitBreakGlass = async () => {
     if (!token) {
@@ -29,6 +37,7 @@ export default function EmergencyScanView({ initialPatientId = "" }) {
 
     setBusy(true);
     setError("");
+    setExpired(false);
     try {
       const access = await api.emergency({ patientId: patientId.trim(), justification });
       setAccessGrant(access);
@@ -47,7 +56,12 @@ export default function EmergencyScanView({ initialPatientId = "" }) {
       const data = await api.emergencyCritical(accessGrant.accessId);
       setCriticalData(data);
     } catch (err) {
-      setError(err.message || "Failed to retrieve critical emergency data");
+      if (err.status === 410) {
+        setExpired(true);
+        setError("Emergency access session has expired (15-minute TTL elapsed).");
+      } else {
+        setError(err.message || "Failed to retrieve critical emergency data");
+      }
     } finally {
       setBusy(false);
     }
@@ -100,7 +114,15 @@ export default function EmergencyScanView({ initialPatientId = "" }) {
 
         {error && <p className="error" style={{ color: "#ef4444", marginTop: "1rem" }}>{error}</p>}
 
-        {accessGrant && !criticalData && (
+        {expired && (
+          <div style={{ marginTop: "1rem" }}>
+            <button className="secondary" onClick={resetSession}>
+              🔄 Request New Emergency Access Session
+            </button>
+          </div>
+        )}
+
+        {accessGrant && !criticalData && !expired && (
           <div style={{ marginTop: "1.5rem", padding: "1rem", background: "rgba(16,185,129,0.1)", borderRadius: "8px" }}>
             <p className="success">
               Emergency break-glass session created! Valid until{" "}
