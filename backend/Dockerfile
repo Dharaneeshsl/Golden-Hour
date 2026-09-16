@@ -4,5 +4,6 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 COPY src ./src
 COPY migrations ./migrations
+USER node
 EXPOSE 4000
-CMD ["node","src/app.js"]
+CMD ["node", "src/app.js"]

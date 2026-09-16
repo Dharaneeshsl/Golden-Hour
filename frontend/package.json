@@ -1,6 +1,27 @@
 {
-  "name": "golden-hour-frontend", "version": "1.1.0", "private": true, "type": "module",
-  "scripts": { "dev": "vite", "build": "vite build", "preview": "vite preview", "test": "vitest run" },
-  "dependencies": { "@vitejs/plugin-react": "^4.3.1", "ethers": "^6.13.4", "qrcode.react": "^4.1.0", "react": "^18.3.1", "react-dom": "^18.3.1", "react-router-dom": "^6.28.0", "vite": "^5.4.8" },
-  "devDependencies": { "vitest": "^2.1.5" }
+  "name": "golden-hour-frontend",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "ethers": "^6.13.4",
+    "qrcode.react": "^4.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0",
+    "vite": "^5.4.8"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.5"
+  }
 }

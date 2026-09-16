@@ -1,2 +1,21 @@
 import { QRCodeSVG } from "qrcode.react";
-export default function QRCodeCard({ patientId }) { return <div className="qr"><QRCodeSVG value={`goldenhour://patient/${patientId}`} size={112}/><div><b>Emergency QR card</b><p>Verified clinicians can use this ID to request logged, critical-only access.</p><button className="text-button" onClick={() => navigator.clipboard?.writeText(`goldenhour://patient/${patientId}`)}>Copy QR payload →</button></div></div>; }
+
+export default function QRCodeCard({ patientId }) {
+  const url = `${window.location.origin}/emergency/${patientId}`;
+
+  return (
+    <div className="qr">
+      <QRCodeSVG value={url} size={112} />
+      <div>
+        <b>Emergency QR Card</b>
+        <p>Verified clinicians can scan this code to launch logged, break-glass critical access.</p>
+        <button
+          className="text-button"
+          onClick={() => navigator.clipboard?.writeText(url)}
+        >
+          Copy Emergency Link →
+        </button>
+      </div>
+    </div>
+  );
+}

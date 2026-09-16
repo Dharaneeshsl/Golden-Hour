@@ -5,19 +5,31 @@ services:
       POSTGRES_DB: goldenhour
       POSTGRES_USER: goldenhour
       POSTGRES_PASSWORD: goldenhour-dev-only
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL","pg_isready -U goldenhour -d goldenhour"]
+      test: ["CMD-SHELL", "pg_isready -U goldenhour -d goldenhour"]
       interval: 5s
       timeout: 5s
       retries: 10
+
   backend:
     build: ./backend
     ports: ["4000:4000"]
     env_file: ["./backend/.env"]
     environment:
       DATABASE_URL: postgresql://goldenhour:goldenhour-dev-only@postgres:5432/goldenhour
+    command: sh -c "node src/config/migrate.js && node src/app.js"
     depends_on:
       postgres:
         condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports: ["3000:3000"]
+    env_file: ["./frontend/.env"]
+    depends_on:
+      - backend
+
 volumes:
   postgres_data:

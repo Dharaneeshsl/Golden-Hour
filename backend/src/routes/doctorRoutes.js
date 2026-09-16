@@ -1,1 +1,13 @@
-const express=require("express");const{requireAuth}=require("../middleware/authMiddleware");const{requireRole}=require("../middleware/roleCheck");module.exports=c=>{const r=express.Router();r.post("/register",requireAuth,c.register);r.get("/access",requireAuth,c.access);r.get("/",requireAuth,requireRole("admin"),c.list);r.post("/:wallet/verify",requireAuth,requireRole("admin"),c.verify);return r};
+const express = require("express");
+const { requireAuth } = require("../middleware/authMiddleware");
+const { requireRole } = require("../middleware/roleCheck");
+
+module.exports = (c) => {
+  const r = express.Router();
+  r.post("/register", requireAuth, c.register);
+  r.get("/access", requireAuth, c.access);
+  r.get("/", requireAuth, requireRole("admin"), c.list);
+  r.post("/:wallet/verify", requireAuth, requireRole("admin"), c.verify);
+  r.patch("/:wallet/status", requireAuth, requireRole("admin"), c.updateStatus);
+  return r;
+};
