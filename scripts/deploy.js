@@ -1,9 +1,13 @@
 const hre = require("hardhat");
 
+function resolveRelayAddress(privateKey, fallbackAddress) {
+  return privateKey ? new hre.ethers.Wallet(privateKey).address : fallbackAddress;
+}
+
 async function main() {
   const [deployer] = await hre.ethers.getSigners();
   const relayKey = process.env.BACKEND_PRIVATE_KEY;
-  const relayAddress = relayKey ? new hre.ethers.Wallet(relayKey).address : deployer.address;
+  const relayAddress = resolveRelayAddress(relayKey, deployer.address);
 
   if (!relayKey) {
     console.warn("BACKEND_PRIVATE_KEY is not set; using deployer as the relay address for this deployment.");
@@ -57,7 +61,11 @@ async function main() {
   }, null, 2));
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { main, resolveRelayAddress };
