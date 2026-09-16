@@ -14,6 +14,8 @@ services:
     build: ./backend
     ports: ["4000:4000"]
     env_file: ["./backend/.env"]
+    environment:
+      DATABASE_URL: postgresql://goldenhour:goldenhour-dev-only@postgres:5432/goldenhour
     depends_on:
       postgres:
         condition: service_healthy
