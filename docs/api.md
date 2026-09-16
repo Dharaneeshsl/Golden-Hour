@@ -13,8 +13,8 @@ All routes except `GET /health` and nonce/verification endpoints require a beare
 | `POST` | `/api/records` | Verified Doctor | Requires active consent, encrypts clinical data, stores it on IPFS, persists metadata, and synchronizes `MedicalRecord` when configured. |
 | `GET` | `/api/records/:patientId` | Patient / Consented Doctor / Admin | Lists record metadata. |
 | `GET` | `/api/records/:patientId/:recordId` | Patient / Consented Doctor / Admin | Fetches and decrypts the encrypted clinical payload after authorization. |
-| `POST` | `/api/emergency-access` | Verified Doctor | Creates a 15-minute break-glass grant and synchronizes the emergency event on-chain when configured. |
-| `GET` | `/api/emergency-access/critical/:accessId` | Emergency Actor / Admin | Returns critical-only data while the 15-minute grant is valid; expired access returns `410`. |
+| `POST` | `/api/emergency-access` | Verified Doctor | Creates a 15-minute break-glass grant and returns only its access metadata; critical data is disclosed only through the time-bound critical endpoint. |
+| `GET` | `/api/emergency-access/critical/:accessId` | Emergency Actor / Admin | Returns critical-only data while the 15-minute grant is valid; invalid/missing expiry or expired access returns `410`. |
 | `GET` | `/api/emergency-access/:patientId` | Patient / Admin | Lists emergency audit events. |
 | `GET` | `/api/doctors/access` | Authenticated | Returns provider status and permissions. |
 | `GET` | `/api/doctors?status=pending` | Admin | Lists providers awaiting verification. |
@@ -28,8 +28,12 @@ Patients grant/revoke consent through the consent endpoints. Administrators have
 
 The default local store is `.data/goldenhour.json`; `DATA_FILE` can override it. Production deployments should use a durable database and secure key management. Clinical data uses AES-256-GCM before IPFS persistence. The record-detail endpoint decrypts only after patient, consented verified-provider, or admin authorization.
 
+## Persistence contract
+
+The PostgreSQL adapter explicitly aliases SQL `snake_case` columns to the API's `camelCase` domain shape (`recordType`, `doctorId`, `ipfsCid`, `createdAt`, `expiresAt`, provider fields, and consent fields). This keeps PostgreSQL and the JSON development store behaviorally aligned.
+
 ## Chain integration
 
-Chain integration is implemented as a trusted backend relay. `PatientRegistry`, `AccessControl`, `MedicalRecord`, and `EmergencyAccess` expose explicit relay operations while retaining direct wallet operations. Deploy with the updated `scripts/deploy.js` and configure `RPC_URL`, `BACKEND_PRIVATE_KEY`, `REGISTRY_ADDRESS`, `ACCESS_CONTROL_ADDRESS`, `RECORDS_ADDRESS`, `AUDIT_ADDRESS`, and `EMERGENCY_ADDRESS`. The backend signer must have the required contract permissions. Without this configuration, the API intentionally remains usable in local/off-chain mode.
+Chain integration is implemented as a trusted backend relay. `PatientRegistry`, `AccessControl`, `MedicalRecord`, and `EmergencyAccess` expose explicit relay operations while retaining direct wallet operations. Deploy with `BACKEND_PRIVATE_KEY` configured so the deployment script derives the operational relay address and grants/transfers the required permissions. The relay wallet must also be funded for gas on the target network. Configure `RPC_URL`, `BACKEND_PRIVATE_KEY`, `REGISTRY_ADDRESS`, `ACCESS_CONTROL_ADDRESS`, `RECORDS_ADDRESS`, `AUDIT_ADDRESS`, and `EMERGENCY_ADDRESS`. Without this configuration, the API intentionally remains usable in local/off-chain mode.
 
 The frontend `useContract` helper remains available for direct wallet interaction, but patient registration is coordinated through the authenticated API flow so the backend can keep database and chain state aligned. After provider verification, an already-issued JWT retains its original role claim until it expires or the user signs in again; live provider-status checks still govern clinical access.
