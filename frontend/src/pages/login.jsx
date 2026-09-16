@@ -19,7 +19,7 @@ const DEMO_ACCOUNTS = {
   patient: {
     label: "Patient Account",
     wallet: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
-    privateKey: "0x5de4111FA134d257B23e8626E6F893a7B6B0934F",
+    privateKey: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
   },
 };
 

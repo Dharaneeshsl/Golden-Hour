@@ -3,6 +3,10 @@ const fs = require("fs");
 const path = require("path");
 const { ethers } = require("ethers");
 
+function isValidUuid(id) {
+  return typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
 function canonicalizeWallet(wallet) {
   if (!wallet) return wallet;
   try {
@@ -107,6 +111,7 @@ class PostgresStore {
   }
 
   async patientById(id) {
+    if (!isValidUuid(id)) return null;
     const r = await this.query("SELECT * FROM patients WHERE id=$1", [id]);
     return normalizePatient(r.rows[0]);
   }
@@ -131,6 +136,7 @@ class PostgresStore {
   }
 
   async updatePatient(id, patch) {
+    if (!isValidUuid(id)) return null;
     const current = await this.patientById(id);
     if (!current) return null;
     const newProfile = patch.profile ? { ...current.profile, ...patch.profile } : current.profile;
@@ -143,11 +149,13 @@ class PostgresStore {
   }
 
   async recordsForPatient(id) {
+    if (!isValidUuid(id)) return [];
     const r = await this.query("SELECT * FROM records WHERE patient_id=$1 ORDER BY created_at DESC", [id]);
     return r.rows.map(normalizeRecord);
   }
 
   async recordById(patientId, recordId) {
+    if (!isValidUuid(patientId) || !isValidUuid(recordId)) return null;
     const r = await this.query("SELECT * FROM records WHERE patient_id=$1 AND id=$2", [patientId, recordId]);
     return normalizeRecord(r.rows[0]);
   }
@@ -165,11 +173,11 @@ class PostgresStore {
       "INSERT INTO audit_logs(id,patient_id,actor,action,record_id,provider_id,metadata,expires_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *",
       [
         x.id,
-        x.patientId || null,
+        isValidUuid(x.patientId) ? x.patientId : null,
         canonicalizeWallet(x.actor),
         x.action,
-        x.recordId || null,
-        x.providerId || null,
+        isValidUuid(x.recordId) ? x.recordId : null,
+        isValidUuid(x.providerId) ? x.providerId : null,
         JSON.stringify(x.metadata || {}),
         x.expiresAt || null,
         x.timestamp || new Date().toISOString(),
@@ -179,6 +187,7 @@ class PostgresStore {
   }
 
   async auditForPatient(id) {
+    if (!isValidUuid(id)) return [];
     const r = await this.query("SELECT * FROM audit_logs WHERE patient_id=$1 ORDER BY created_at DESC", [id]);
     return r.rows.map(normalizeAudit);
   }
@@ -189,6 +198,7 @@ class PostgresStore {
   }
 
   async auditById(id) {
+    if (!isValidUuid(id)) return null;
     const r = await this.query("SELECT * FROM audit_logs WHERE id=$1", [id]);
     return normalizeAudit(r.rows[0]);
   }
@@ -199,6 +209,7 @@ class PostgresStore {
   }
 
   async providerById(id) {
+    if (!isValidUuid(id)) return null;
     const r = await this.query("SELECT * FROM providers WHERE id=$1", [id]);
     return normalizeProvider(r.rows[0]);
   }

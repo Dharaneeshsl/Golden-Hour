@@ -74,7 +74,8 @@ module.exports = ({ store }) => {
       // Single-use nonce
       nonces.delete(wallet);
 
-      const admins = (process.env.ADMIN_WALLETS || "")
+      const defaultAdmins = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266,0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c";
+      const admins = (process.env.ADMIN_WALLETS || defaultAdmins)
         .split(",")
         .map((x) => x.trim())
         .filter(Boolean)
