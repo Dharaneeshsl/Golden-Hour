@@ -113,7 +113,7 @@ export default function App() {
     setToken(null);
     localStorage.removeItem("goldenhour_user");
     setUser(null);
-    navigate("/");
+    navigate("/login");
   };
 
   return (
@@ -156,7 +156,7 @@ export default function App() {
                 {user.role}
               </span>
               <button className="logout-btn" onClick={logout}>
-                🚪 Logout
+                🚪 Disconnect & Logout
               </button>
             </div>
           ) : (

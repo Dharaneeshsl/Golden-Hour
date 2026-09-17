@@ -61,6 +61,7 @@ export default function WalletConnectButton({ onConnected }) {
     e.stopPropagation();
     setAddress("");
     onConnected?.("");
+    window.dispatchEvent(new Event("goldenhour_session_expired"));
   };
 
   return (

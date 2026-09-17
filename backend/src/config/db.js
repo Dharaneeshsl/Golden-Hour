@@ -131,8 +131,10 @@ class PostgresStore {
   }
 
   async patientByWallet(wallet) {
+    if (!wallet) return null;
+    const w = wallet.toLowerCase();
     try {
-      const r = await this.query("SELECT * FROM patients WHERE lower(wallet)=lower($1)", [wallet]);
+      const r = await this.query("SELECT * FROM patients WHERE lower(wallet)=$1", [w]);
       if (r && r.rows && r.rows.length > 0) return normalizePatient(r.rows[0]);
     } catch (e) {
       console.warn("Postgres query failed, falling back to JsonStore for patientByWallet:", e.message);
@@ -224,8 +226,10 @@ class PostgresStore {
   }
 
   async providerByWallet(wallet) {
+    if (!wallet) return null;
+    const w = wallet.toLowerCase();
     try {
-      const r = await this.query("SELECT * FROM providers WHERE lower(wallet)=lower($1)", [wallet]);
+      const r = await this.query("SELECT * FROM providers WHERE lower(wallet)=$1", [w]);
       if (r && r.rows && r.rows.length > 0) return normalizeProvider(r.rows[0]);
     } catch (e) {
       console.warn("Postgres query failed, falling back to JsonStore for providerByWallet:", e.message);
@@ -314,7 +318,9 @@ class PostgresStore {
 class JsonStore {
   constructor(
     file = process.env.DATA_FILE ||
-      path.join(process.cwd(), ".data", "goldenhour.json")
+      (fs.existsSync(path.join(process.cwd(), ".data", "goldenhour.json"))
+        ? path.join(process.cwd(), ".data", "goldenhour.json")
+        : path.join(__dirname, "../../.data", "goldenhour.json"))
   ) {
     this.file = file;
     this.state = {
