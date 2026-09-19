@@ -107,7 +107,7 @@ export default function PatientDashboard({ patientId = "", wallet = "" }) {
       <div className="section-heading">
         <div>
           <p className="eyebrow">Patient Dashboard</p>
-          <h2>{patient.profile?.name || `Patient ${patient.id}`}</h2>
+          <h2>{patient.profile?.fullName || patient.profile?.name || `Patient ${patient.id}`}</h2>
         </div>
         <span className="verified">● Authenticated</span>
       </div>

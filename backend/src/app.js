@@ -34,6 +34,10 @@ async function createApp({
   const app = express();
   app.disable("x-powered-by");
 
+  if (process.env.TRUST_PROXY) {
+    app.set("trust proxy", process.env.TRUST_PROXY === "true" ? 1 : process.env.TRUST_PROXY);
+  }
+
   app.use((req, res, next) => {
     req.requestId = crypto.randomUUID();
     res.setHeader("X-Request-Id", req.requestId);

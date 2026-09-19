@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, Route, Routes, useNavigate, useParams, Navigate } from "react-router-dom";
 import PatientDashboard from "./components/PatientDashboard";
 import DoctorDashboard from "./components/DoctorDashboard";
@@ -8,7 +8,8 @@ import AdminDashboard from "./components/AdminDashboard";
 import Login from "./pages/login";
 import WalletConnectButton from "./components/WalletConnectButton";
 import ErrorBoundary from "./components/ErrorBoundary";
-import { setToken } from "./api";
+import { fullLogoutCleanup } from "./utils/session";
+import { isDemoWallet } from "./config/demoAccounts";
 
 function Home({ user }) {
   return (
@@ -73,6 +74,36 @@ export default function App() {
     JSON.parse(localStorage.getItem("goldenhour_user") || "null")
   );
   const navigate = useNavigate();
+  const loggingOutRef = useRef(false);
+  const sessionGen = useRef(0);
+  const ignoreEmptyAccountsUntil = useRef(0);
+
+  const login = (next) => {
+    sessionGen.current += 1;
+    loggingOutRef.current = false;
+    ignoreEmptyAccountsUntil.current = Date.now() + 2000;
+    localStorage.setItem("goldenhour_user", JSON.stringify(next));
+    setUser(next);
+  };
+
+  const complete = (payload = {}) =>
+    login({
+      ...user,
+      ...payload,
+      role: payload.role || user?.role,
+      patientId: payload.id ?? payload.patientId ?? user?.patientId ?? null,
+    });
+
+  const logout = () => {
+    if (loggingOutRef.current) return;
+    loggingOutRef.current = true;
+    const gen = sessionGen.current;
+    setUser(null);
+    void fullLogoutCleanup().finally(() => {
+      if (sessionGen.current !== gen) return;
+      navigate("/login");
+    });
+  };
 
   useEffect(() => {
     const handleExpired = () => {
@@ -81,12 +112,17 @@ export default function App() {
     window.addEventListener("goldenhour_session_expired", handleExpired);
 
     const handleAccountsChanged = (accounts) => {
-      if (user && accounts && accounts.length > 0) {
-        const newAddress = accounts[0].toLowerCase();
-        const currentAddress = (user.wallet || "").toLowerCase();
-        if (newAddress !== currentAddress) {
-          logout();
-        }
+      if (!user || loggingOutRef.current) return;
+      if (isDemoWallet(user.wallet)) return;
+      if (!accounts || accounts.length === 0) {
+        if (Date.now() < ignoreEmptyAccountsUntil.current) return;
+        logout();
+        return;
+      }
+      const newAddress = accounts[0].toLowerCase();
+      const currentAddress = (user.wallet || "").toLowerCase();
+      if (newAddress !== currentAddress) {
+        logout();
       }
     };
 
@@ -101,20 +137,6 @@ export default function App() {
       }
     };
   }, [user]);
-
-  const login = (next) => {
-    localStorage.setItem("goldenhour_user", JSON.stringify(next));
-    setUser(next);
-  };
-
-  const complete = (patient) => login({ ...user, patientId: patient.id });
-
-  const logout = () => {
-    setToken(null);
-    localStorage.removeItem("goldenhour_user");
-    setUser(null);
-    navigate("/login");
-  };
 
   return (
     <ErrorBoundary>

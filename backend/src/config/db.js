@@ -133,14 +133,8 @@ class PostgresStore {
   async patientByWallet(wallet) {
     if (!wallet) return null;
     const w = wallet.toLowerCase();
-    try {
-      const r = await this.query("SELECT * FROM patients WHERE lower(wallet)=$1", [w]);
-      if (r && r.rows && r.rows.length > 0) return normalizePatient(r.rows[0]);
-    } catch (e) {
-      console.warn("Postgres query failed, falling back to JsonStore for patientByWallet:", e.message);
-    }
-    const fallbackStore = new JsonStore();
-    return await fallbackStore.patientByWallet(wallet);
+    const r = await this.query("SELECT * FROM patients WHERE lower(wallet)=$1", [w]);
+    return r && r.rows && r.rows.length > 0 ? normalizePatient(r.rows[0]) : null;
   }
 
   async allPatients() {
@@ -228,14 +222,8 @@ class PostgresStore {
   async providerByWallet(wallet) {
     if (!wallet) return null;
     const w = wallet.toLowerCase();
-    try {
-      const r = await this.query("SELECT * FROM providers WHERE lower(wallet)=$1", [w]);
-      if (r && r.rows && r.rows.length > 0) return normalizeProvider(r.rows[0]);
-    } catch (e) {
-      console.warn("Postgres query failed, falling back to JsonStore for providerByWallet:", e.message);
-    }
-    const fallbackStore = new JsonStore();
-    return await fallbackStore.providerByWallet(wallet);
+    const r = await this.query("SELECT * FROM providers WHERE lower(wallet)=$1", [w]);
+    return r && r.rows && r.rows.length > 0 ? normalizeProvider(r.rows[0]) : null;
   }
 
   async providerById(id) {
@@ -422,7 +410,7 @@ class JsonStore {
   async auditById(id) {
     const r = this.state.audit.find((x) => x.id === id);
     if (!r) return null;
-    return r; // Return reference directly so tests mutating event properties work cleanly
+    return normalizeAudit(r);
   }
 
   async providerByWallet(w) {

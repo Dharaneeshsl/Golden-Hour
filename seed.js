@@ -2,20 +2,21 @@ const { ethers } = require("ethers");
 
 const API = "http://localhost:4000";
 
-const WALLETS = {
-  admin: new ethers.Wallet("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"), // 0xf39F...
-  doctor: new ethers.Wallet("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"), // 0x7099...
-  patient: new ethers.Wallet("0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"), // 0x3C44...
+const DEMO_WALLETS = {
+  admin: "0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c",
+  doctor: "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+  patient: "0xA9A65f72a90f4D4021CB56CC70f21D84fD444504",
 };
 
-async function login(signer) {
-  const nRes = await fetch(`${API}/api/auth/nonce/${signer.address}`);
-  const { nonce, message } = await nRes.json();
-  const signature = await signer.signMessage(message);
+async function login(wallet) {
+  const nRes = await fetch(`${API}/api/auth/nonce/${wallet}`);
+  if (!nRes.ok) throw new Error("Nonce request failed: " + (await nRes.text()));
+  await nRes.json();
+
   const vRes = await fetch(`${API}/api/auth/verify`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ wallet: signer.address, signature }),
+    body: JSON.stringify({ wallet, signature: `DEMO_SIGNATURE_${wallet}` }),
   });
   const data = await vRes.json();
   if (!vRes.ok) throw new Error("Login failed: " + JSON.stringify(data));
@@ -26,9 +27,9 @@ async function seed() {
   console.log("=== GoldenHour Live Demo Data Seeder ===");
 
   // 1. Authenticate tokens
-  const adminToken = await login(WALLETS.admin);
-  const docToken = await login(WALLETS.doctor);
-  const patToken = await login(WALLETS.patient);
+  const adminToken = await login(DEMO_WALLETS.admin);
+  const docToken = await login(DEMO_WALLETS.doctor);
+  const patToken = await login(DEMO_WALLETS.patient);
   console.log("✅ Authenticated 3 roles: Admin, Provider, Patient");
 
   const regPat = await fetch(`${API}/api/patients`, {
@@ -62,9 +63,10 @@ async function seed() {
   });
   console.log("✅ Provider Registered (Status: 201/200):", regDoc.status);
 
-  const verifyDoc = await fetch(`${API}/api/doctors/${WALLETS.doctor.address}/verify`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${adminToken}` },
+  const verifyDoc = await fetch(`${API}/api/doctors/${DEMO_WALLETS.doctor}/status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ status: "verified" }),
   });
   console.log("✅ Provider Status Updated to Verified by Admin:", (await verifyDoc.json()).status);
 
@@ -72,7 +74,7 @@ async function seed() {
   const grantRes = await fetch(`${API}/api/consents/${patientId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${patToken}` },
-    body: JSON.stringify({ wallet: WALLETS.doctor.address }),
+    body: JSON.stringify({ wallet: DEMO_WALLETS.doctor }),
   });
   console.log("✅ Consent Granted from Patient to Provider:", grantRes.status);
 

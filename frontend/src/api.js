@@ -1,8 +1,14 @@
+import { clearBrowserSession, markWalletConnected } from "./utils/session";
+
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
 
 export function setToken(t) {
-  if (t) localStorage.setItem("goldenhour_token", t);
-  else localStorage.removeItem("goldenhour_token");
+  if (t) {
+    localStorage.setItem("goldenhour_token", t);
+    markWalletConnected();
+  } else {
+    localStorage.removeItem("goldenhour_token");
+  }
 }
 
 export function getToken() {
@@ -19,8 +25,7 @@ export async function request(path, options = {}) {
 
   if (!r.ok) {
     if (r.status === 401 && path !== "/api/auth/verify") {
-      setToken(null);
-      localStorage.removeItem("goldenhour_user");
+      clearBrowserSession();
       window.dispatchEvent(new Event("goldenhour_session_expired"));
     }
     const error = new Error(data.error || `Request failed: ${r.status}`);
@@ -49,7 +54,6 @@ export const api = {
   providerAccess: () => request("/api/doctors/access"),
   registerProvider: (body) => request("/api/doctors/register", { method: "POST", body: JSON.stringify(body) }),
   providers: (status) => request(`/api/doctors${status ? `?status=${encodeURIComponent(status)}` : ""}`),
-  verifyProvider: (wallet) => request(`/api/doctors/${encodeURIComponent(wallet)}/verify`, { method: "POST" }),
   updateProviderStatus: (wallet, status) => request(`/api/doctors/${encodeURIComponent(wallet)}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
   consents: (id) => request(`/api/consents/${id}`),
   providerConsents: () => request("/api/consents/provider"),

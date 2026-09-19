@@ -16,12 +16,21 @@ function getJwtSecret() {
   return value;
 }
 
+const DEFAULT_DEMO_ADMINS = [
+  "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c",
+];
+
 function getAdminWallets() {
-  return (process.env.ADMIN_WALLETS || "")
+  const raw = (process.env.ADMIN_WALLETS || "")
     .split(",")
     .map((x) => x.trim())
-    .filter(Boolean)
-    .map(canonicalizeWallet);
+    .filter(Boolean);
+
+  if (raw.length === 0 && process.env.NODE_ENV !== "production") {
+    return DEFAULT_DEMO_ADMINS.map(canonicalizeWallet);
+  }
+  return raw.map(canonicalizeWallet);
 }
 
 function isCurrentAdmin(wallet) {

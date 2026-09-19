@@ -2,9 +2,24 @@ const express = require("express");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { ethers } = require("ethers");
+const { getAdminWallets } = require("../config/authConfig");
 
 const nonces = new Map();
 const TTL = 5 * 60 * 1000; // 5 minutes
+
+const DEMO_LOGIN_ENABLED =
+  process.env.NODE_ENV !== "production" && process.env.ALLOW_DEMO_LOGIN === "true";
+
+const DEMO_WALLETS = new Set(
+  [
+    "0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c",
+    "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+    "0xA9A65f72a90f4D4021CB56CC70f21D84fD444504",
+    "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+  ].map((w) => ethers.getAddress(w))
+);
 
 function secret() {
   const value = process.env.JWT_SECRET;
@@ -63,7 +78,11 @@ module.exports = ({ store }) => {
         return res.status(401).json({ error: "Nonce missing or expired" });
       }
 
-      const isDemoSig = signature === `DEMO_SIGNATURE_${wallet}`;
+      const isDemoSig =
+        DEMO_LOGIN_ENABLED &&
+        DEMO_WALLETS.has(wallet) &&
+        signature === `DEMO_SIGNATURE_${wallet}`;
+
       if (!isDemoSig) {
         const message = `GoldenHour authentication nonce: ${entry.nonce}`;
         const recoveredRaw = ethers.verifyMessage(message, signature);
@@ -77,13 +96,7 @@ module.exports = ({ store }) => {
       // Single-use nonce
       nonces.delete(wallet);
 
-      const defaultAdmins = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266,0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c";
-      const admins = (process.env.ADMIN_WALLETS || defaultAdmins)
-        .split(",")
-        .map((x) => x.trim())
-        .filter(Boolean)
-        .map((x) => (ethers.isAddress(x) ? ethers.getAddress(x) : x.toLowerCase()));
-
+      const admins = getAdminWallets();
       const provider = await store.providerByWallet(wallet);
       const patient = await store.patientByWallet(wallet);
 

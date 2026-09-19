@@ -33,7 +33,7 @@ export default function PatientOnboarding({ onComplete }) {
     setError("");
     try {
       const patient = await api.registerPatient({
-        profile: { name },
+        profile: { fullName: name, name },
         critical: {
           bloodGroup,
           allergies: list(allergies),

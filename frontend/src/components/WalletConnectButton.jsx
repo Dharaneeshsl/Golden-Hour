@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useContract } from "../hooks/useContract";
 import { shortenAddress } from "../utils/web3";
+import { fullLogoutCleanup, isWalletDisconnected, markWalletConnected } from "../utils/session";
 
 export default function WalletConnectButton({ onConnected }) {
   const [address, setAddress] = useState("");
@@ -8,6 +9,7 @@ export default function WalletConnectButton({ onConnected }) {
   const { connect } = useContract();
 
   useEffect(() => {
+    if (isWalletDisconnected()) return;
     if (window.ethereum) {
       window.ethereum.request({ method: "eth_accounts" }).then((accounts) => {
         if (accounts && accounts[0]) {
@@ -39,6 +41,7 @@ export default function WalletConnectButton({ onConnected }) {
     setError("");
     try {
       const wallet = await connect();
+      markWalletConnected();
       setAddress(wallet.address);
       onConnected?.(wallet.address);
     } catch (err) {
@@ -61,7 +64,9 @@ export default function WalletConnectButton({ onConnected }) {
     e.stopPropagation();
     setAddress("");
     onConnected?.("");
-    window.dispatchEvent(new Event("goldenhour_session_expired"));
+    void fullLogoutCleanup().finally(() => {
+      window.dispatchEvent(new Event("goldenhour_session_expired"));
+    });
   };
 
   return (

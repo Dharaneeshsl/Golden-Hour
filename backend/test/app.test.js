@@ -203,7 +203,7 @@ test("emergency access is time-bounded and admin can audit", async () => {
 
   const event = await store.auditById(emergency.body.accessId);
   event.expiresAt = new Date(Date.now() - 1000).toISOString();
-  await store.save();
+  await store.save(event);
 
   const expired = await request(server)
     .get(`/api/emergency-access/critical/${emergency.body.accessId}`)

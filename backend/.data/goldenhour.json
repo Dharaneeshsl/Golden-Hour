@@ -1,0 +1,190 @@
+{
+  "patients": [
+    {
+      "id": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
+      "wallet": "0xA9A65f72a90f4D4021CB56CC70f21D84fD444504",
+      "profile": {
+        "fullName": "John Doe",
+        "age": 34,
+        "gender": "Male",
+        "phone": "+1-555-0199"
+      },
+      "critical": {
+        "bloodGroup": "O+",
+        "allergies": [
+          "Penicillin",
+          "Peanuts"
+        ],
+        "conditions": [
+          "Asthma"
+        ],
+        "emergencyContact": "+1-555-0122"
+      },
+      "createdAt": "2026-09-19T19:28:07.237Z"
+    }
+  ],
+  "records": [
+    {
+      "id": "4841ea1d-f9e8-49d1-82ca-0881e6a20633",
+      "patientId": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
+      "recordType": "Consultation",
+      "doctorId": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "doctorWallet": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "ipfsCid": "QmeyrLbeZbuwYiaJbNXQ2sMos1feM7AvDGwd3tdPFU3CdH",
+      "encryptedHash": "c0b30cf16e86e2ed9d888989ca21ad5d5fcab754f1cc2ac144f8189d3a789fe8",
+      "createdAt": "2026-09-19T19:28:09.439Z"
+    },
+    {
+      "id": "63c44c49-147e-4527-9695-800297807988",
+      "patientId": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
+      "recordType": "Lab Results",
+      "doctorId": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "doctorWallet": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "ipfsCid": "QmUbGTCBqtBmPD2bLB6sRrRxCEpPYhpUBT1gNEuRVajoMD",
+      "encryptedHash": "eb312c26ca20213874a6b797a38d17b580d55ec8c15c15141ee43eeec29af24b",
+      "createdAt": "2026-09-19T19:28:10.187Z"
+    }
+  ],
+  "audit": [
+    {
+      "id": "2b934565-cae4-4857-8386-2bc484dd29d2",
+      "patientId": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
+      "actor": "0xA9A65f72a90f4D4021CB56CC70f21D84fD444504",
+      "action": "PATIENT_REGISTERED",
+      "recordId": null,
+      "providerId": null,
+      "metadata": {
+        "chainPatientId": null
+      },
+      "expiresAt": null,
+      "timestamp": "2026-09-19T19:28:07.240Z",
+      "createdAt": "2026-09-19T19:28:07.240Z"
+    },
+    {
+      "id": "ebb53dfa-05f2-4d12-9256-f0daedafdd79",
+      "patientId": null,
+      "actor": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "action": "PROVIDER_REGISTERED",
+      "recordId": null,
+      "providerId": "aa06f111-ba75-4212-996d-b0c6a382b006",
+      "metadata": {},
+      "expiresAt": null,
+      "timestamp": "2026-09-19T19:28:07.247Z",
+      "createdAt": "2026-09-19T19:28:07.247Z"
+    },
+    {
+      "id": "15bf6c83-b500-40c0-886b-5bf6bc6c2227",
+      "patientId": null,
+      "actor": "0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c",
+      "action": "PROVIDER_STATUS_CHANGED_VERIFIED",
+      "recordId": null,
+      "providerId": "aa06f111-ba75-4212-996d-b0c6a382b006",
+      "metadata": {
+        "previousStatus": "pending",
+        "newStatus": "verified"
+      },
+      "expiresAt": null,
+      "timestamp": "2026-09-19T19:28:07.256Z",
+      "createdAt": "2026-09-19T19:28:07.256Z"
+    },
+    {
+      "id": "05a80e77-6d16-4e64-9283-d7c7785defec",
+      "patientId": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
+      "actor": "0xA9A65f72a90f4D4021CB56CC70f21D84fD444504",
+      "action": "CONSENT_GRANTED",
+      "recordId": null,
+      "providerId": "aa06f111-ba75-4212-996d-b0c6a382b006",
+      "metadata": {
+        "scope": [
+          "records"
+        ]
+      },
+      "expiresAt": null,
+      "timestamp": "2026-09-19T19:28:07.264Z",
+      "createdAt": "2026-09-19T19:28:07.264Z"
+    },
+    {
+      "id": "49e5869a-c5d8-4835-944c-6b5f6a06c595",
+      "patientId": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
+      "actor": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "action": "RECORD_CREATED",
+      "recordId": "4841ea1d-f9e8-49d1-82ca-0881e6a20633",
+      "providerId": "aa06f111-ba75-4212-996d-b0c6a382b006",
+      "metadata": {
+        "recordType": "Consultation",
+        "chainPatientId": null
+      },
+      "expiresAt": null,
+      "timestamp": "2026-09-19T19:28:09.441Z",
+      "createdAt": "2026-09-19T19:28:09.441Z"
+    },
+    {
+      "id": "4bf75121-3b19-48c9-8c30-00eecb5f991e",
+      "patientId": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
+      "actor": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "action": "RECORD_CREATED",
+      "recordId": "63c44c49-147e-4527-9695-800297807988",
+      "providerId": "aa06f111-ba75-4212-996d-b0c6a382b006",
+      "metadata": {
+        "recordType": "Lab Results",
+        "chainPatientId": null
+      },
+      "expiresAt": null,
+      "timestamp": "2026-09-19T19:28:10.189Z",
+      "createdAt": "2026-09-19T19:28:10.189Z"
+    },
+    {
+      "id": "5ef82943-db1b-4787-97cb-aaf4cc3b6894",
+      "patientId": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
+      "actor": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "action": "EMERGENCY_BREAK_GLASS",
+      "recordId": null,
+      "providerId": "aa06f111-ba75-4212-996d-b0c6a382b006",
+      "metadata": {
+        "scope": "CRITICAL_ONLY"
+      },
+      "expiresAt": "2026-09-19T19:43:10.197Z",
+      "timestamp": "2026-09-19T19:28:10.197Z",
+      "createdAt": "2026-09-19T19:28:10.197Z"
+    },
+    {
+      "id": "b53608c4-6d41-4731-a568-b6f034344d70",
+      "patientId": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
+      "actor": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "action": "EMERGENCY_CRITICAL_VIEW",
+      "recordId": null,
+      "providerId": "aa06f111-ba75-4212-996d-b0c6a382b006",
+      "metadata": {
+        "accessId": "5ef82943-db1b-4787-97cb-aaf4cc3b6894"
+      },
+      "expiresAt": null,
+      "timestamp": "2026-09-19T19:28:10.202Z",
+      "createdAt": "2026-09-19T19:28:10.202Z"
+    }
+  ],
+  "providers": [
+    {
+      "id": "aa06f111-ba75-4212-996d-b0c6a382b006",
+      "wallet": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "name": "Dr. Marcus Vance, MD",
+      "licenseNumber": "MD-98421-CA",
+      "specialty": "Trauma & Emergency Care",
+      "status": "verified",
+      "verifiedBy": "0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c",
+      "verifiedAt": "2026-09-19T19:28:07.253Z",
+      "createdAt": "2026-09-19T19:28:07.245Z"
+    }
+  ],
+  "consents": [
+    {
+      "id": "d911a476-2ec8-4b7a-9d7f-bf039a2015a8",
+      "patientId": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
+      "providerId": "aa06f111-ba75-4212-996d-b0c6a382b006",
+      "scope": [
+        "records"
+      ],
+      "grantedAt": "2026-09-19T19:28:07.262Z",
+      "status": "active"
+    }
+  ]
+}

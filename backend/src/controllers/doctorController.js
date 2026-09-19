@@ -111,7 +111,13 @@ function createDoctorController({ store, chain }) {
         try {
           await chain.verifyProvider(targetWallet, status === "verified");
         } catch (e) {
-          console.error("Chain provider status sync warning:", e);
+          console.error("Chain provider status sync failed, rolling back:", e);
+          await store.updateProvider(targetWallet, {
+            status: existing.status,
+            verifiedBy: existing.verifiedBy || existing.verified_by,
+            verifiedAt: existing.verifiedAt || existing.verified_at,
+          });
+          return res.status(502).json({ error: "Provider status change failed on chain" });
         }
       }
 

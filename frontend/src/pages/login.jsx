@@ -2,23 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ethers } from "ethers";
 import { api, setToken } from "../api";
-import WalletConnectButton from "../components/WalletConnectButton";
-
-// Canonical 3 accounts for local demo and MetaMask verification
-const DEMO_ACCOUNTS = {
-  admin: {
-    label: "Admin Account (0xeF4C...749c)",
-    wallet: "0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c",
-  },
-  doctor: {
-    label: "Provider Account (0xa299...95Ee)",
-    wallet: "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
-  },
-  patient: {
-    label: "Patient Account (0xA9A6...4504)",
-    wallet: "0xA9A65f72a90f4D4021CB56CC70f21D84fD444504",
-  },
-};
+import { DEMO_ACCOUNTS } from "../config/demoAccounts";
 
 export default function Login({ onLogin }) {
   const navigate = useNavigate();

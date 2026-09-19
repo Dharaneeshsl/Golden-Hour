@@ -11,6 +11,7 @@
     "test": "hardhat test",
     "node": "hardhat node",
     "deploy:local": "hardhat run scripts/deploy.js --network localhost",
+    "deploy:wire": "hardhat run scripts/wireLocalDeployment.js --network localhost",
     "grant:local": "hardhat run scripts/grantAccess.js --network localhost",
     "backend": "npm --prefix backend run dev",
     "frontend": "npm --prefix frontend run dev",

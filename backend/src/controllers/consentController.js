@@ -24,11 +24,11 @@ function createConsentController({ store, chain }) {
       const reqWallet = canonicalizeWallet(req.user.wallet);
       const patientWallet = canonicalizeWallet(patient.wallet);
 
-      if (req.user.role !== "admin" && patientWallet !== reqWallet) {
-        return res.status(403).json({ error: "Only the patient can grant consent" });
-      }
       if (req.user.role === "admin") {
         return res.status(403).json({ error: "Administrators have read-only consent oversight" });
+      }
+      if (patientWallet !== reqWallet) {
+        return res.status(403).json({ error: "Only the patient can grant consent" });
       }
 
       const providerWallet = canonicalizeWallet(req.body.wallet);

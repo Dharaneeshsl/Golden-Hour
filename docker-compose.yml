@@ -1,35 +1,61 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: goldenhour
       POSTGRES_USER: goldenhour
-      POSTGRES_PASSWORD: goldenhour-dev-only
+      POSTGRES_PASSWORD: goldenhour
+      POSTGRES_DB: goldenhour
+    ports:
+      - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - goldenhour_pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U goldenhour -d goldenhour"]
+      test: ["CMD-SHELL", "pg_isready -U goldenhour"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   backend:
-    build: ./backend
-    ports: ["4000:4000"]
-    env_file: ["./backend/.env"]
-    environment:
-      DATABASE_URL: postgresql://goldenhour:goldenhour-dev-only@postgres:5432/goldenhour
-    command: sh -c "node src/config/migrate.js && node src/app.js"
+    build:
+      context: ./backend
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      FRONTEND_ORIGIN: http://localhost:3000,http://localhost:5173
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-in-production-please}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      DATABASE_URL: postgresql://goldenhour:goldenhour@postgres:5432/goldenhour
+      DB_SSL: "false"
+      ADMIN_WALLETS: ${ADMIN_WALLETS:-0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266,0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c}
+      ALLOW_DEMO_LOGIN: "true"
+      RPC_URL: ${RPC_URL:-}
+      BACKEND_PRIVATE_KEY: ${BACKEND_PRIVATE_KEY:-}
+      REGISTRY_ADDRESS: ${REGISTRY_ADDRESS:-}
+      ACCESS_CONTROL_ADDRESS: ${ACCESS_CONTROL_ADDRESS:-}
+      RECORDS_ADDRESS: ${RECORDS_ADDRESS:-}
+      AUDIT_ADDRESS: ${AUDIT_ADDRESS:-}
+      EMERGENCY_ADDRESS: ${EMERGENCY_ADDRESS:-}
+      PINATA_JWT: ${PINATA_JWT:-}
+    ports:
+      - "4000:4000"
+    command: >
+      sh -c "node src/config/migrate.js && node src/app.js"
 
   frontend:
-    build: ./frontend
-    ports: ["3000:3000"]
-    env_file: ["./frontend/.env"]
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: http://localhost:4000
+    restart: unless-stopped
     depends_on:
       - backend
+    ports:
+      - "3000:3000"
 
 volumes:
-  postgres_data:
+  goldenhour_pg_data:
