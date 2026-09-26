@@ -8,7 +8,7 @@ const nonces = new Map();
 const TTL = 5 * 60 * 1000; // 5 minutes
 
 const DEMO_LOGIN_ENABLED =
-  process.env.NODE_ENV !== "production" && process.env.ALLOW_DEMO_LOGIN === "true";
+  process.env.NODE_ENV !== "production" && process.env.ALLOW_DEMO_LOGIN !== "false";
 
 const DEMO_WALLETS = new Set(
   [

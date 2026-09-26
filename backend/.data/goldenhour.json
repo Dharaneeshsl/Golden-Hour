@@ -43,6 +43,26 @@
       "ipfsCid": "QmUbGTCBqtBmPD2bLB6sRrRxCEpPYhpUBT1gNEuRVajoMD",
       "encryptedHash": "eb312c26ca20213874a6b797a38d17b580d55ec8c15c15141ee43eeec29af24b",
       "createdAt": "2026-09-19T19:28:10.187Z"
+    },
+    {
+      "id": "1c2c7317-cdec-49c5-8b6a-b376249b685d",
+      "patientId": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
+      "recordType": "Consultation",
+      "doctorId": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "doctorWallet": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "ipfsCid": "dev00d3d790fc8bb524395f6ef6bf8e584a",
+      "encryptedHash": "99789190128da8294ba3440ca0a0f548125bedd09bded92aa8ea3332497ed329",
+      "createdAt": "2026-09-26T18:35:52.362Z"
+    },
+    {
+      "id": "7b608c08-6765-49e2-8397-1b11b9b51ed0",
+      "patientId": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
+      "recordType": "Lab Results",
+      "doctorId": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "doctorWallet": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "ipfsCid": "dev29beb92c362cec8bf8ea0f856deb5162",
+      "encryptedHash": "4a524c58e58bd264d11fdc7fc486759e07deb204d507a4dd47b426cad0b40ea2",
+      "createdAt": "2026-09-26T18:35:52.368Z"
     }
   ],
   "audit": [
@@ -160,6 +180,95 @@
       "expiresAt": null,
       "timestamp": "2026-09-19T19:28:10.202Z",
       "createdAt": "2026-09-19T19:28:10.202Z"
+    },
+    {
+      "id": "3b5c18f0-81b1-4524-aed5-79f9c1231ffa",
+      "patientId": null,
+      "actor": "0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c",
+      "action": "PROVIDER_STATUS_CHANGED_VERIFIED",
+      "recordId": null,
+      "providerId": "aa06f111-ba75-4212-996d-b0c6a382b006",
+      "metadata": {
+        "previousStatus": "verified",
+        "newStatus": "verified"
+      },
+      "expiresAt": null,
+      "timestamp": "2026-09-26T18:35:52.344Z",
+      "createdAt": "2026-09-26T18:35:52.344Z"
+    },
+    {
+      "id": "ff7244dd-1ae3-4658-b0e6-3bea9fabbeb2",
+      "patientId": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
+      "actor": "0xA9A65f72a90f4D4021CB56CC70f21D84fD444504",
+      "action": "CONSENT_GRANTED",
+      "recordId": null,
+      "providerId": "aa06f111-ba75-4212-996d-b0c6a382b006",
+      "metadata": {
+        "scope": [
+          "records"
+        ]
+      },
+      "expiresAt": null,
+      "timestamp": "2026-09-26T18:35:52.356Z",
+      "createdAt": "2026-09-26T18:35:52.356Z"
+    },
+    {
+      "id": "0fb35291-f651-46a1-b1b3-3b4f44fe4f89",
+      "patientId": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
+      "actor": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "action": "RECORD_CREATED",
+      "recordId": "1c2c7317-cdec-49c5-8b6a-b376249b685d",
+      "providerId": "aa06f111-ba75-4212-996d-b0c6a382b006",
+      "metadata": {
+        "recordType": "Consultation",
+        "chainPatientId": null
+      },
+      "expiresAt": null,
+      "timestamp": "2026-09-26T18:35:52.363Z",
+      "createdAt": "2026-09-26T18:35:52.363Z"
+    },
+    {
+      "id": "32fd6b5d-7020-401f-aa82-5560a515e758",
+      "patientId": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
+      "actor": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "action": "RECORD_CREATED",
+      "recordId": "7b608c08-6765-49e2-8397-1b11b9b51ed0",
+      "providerId": "aa06f111-ba75-4212-996d-b0c6a382b006",
+      "metadata": {
+        "recordType": "Lab Results",
+        "chainPatientId": null
+      },
+      "expiresAt": null,
+      "timestamp": "2026-09-26T18:35:52.369Z",
+      "createdAt": "2026-09-26T18:35:52.369Z"
+    },
+    {
+      "id": "3af46b14-21d6-4fb4-b612-942b293a1e7e",
+      "patientId": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
+      "actor": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "action": "EMERGENCY_BREAK_GLASS",
+      "recordId": null,
+      "providerId": "aa06f111-ba75-4212-996d-b0c6a382b006",
+      "metadata": {
+        "scope": "CRITICAL_ONLY"
+      },
+      "expiresAt": "2026-09-26T18:50:52.373Z",
+      "timestamp": "2026-09-26T18:35:52.373Z",
+      "createdAt": "2026-09-26T18:35:52.373Z"
+    },
+    {
+      "id": "eb2a9473-d9e2-4237-8452-cc4d2cf43d90",
+      "patientId": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
+      "actor": "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+      "action": "EMERGENCY_CRITICAL_VIEW",
+      "recordId": null,
+      "providerId": "aa06f111-ba75-4212-996d-b0c6a382b006",
+      "metadata": {
+        "accessId": "3af46b14-21d6-4fb4-b612-942b293a1e7e"
+      },
+      "expiresAt": null,
+      "timestamp": "2026-09-26T18:35:52.376Z",
+      "createdAt": "2026-09-26T18:35:52.376Z"
     }
   ],
   "providers": [
@@ -171,20 +280,21 @@
       "specialty": "Trauma & Emergency Care",
       "status": "verified",
       "verifiedBy": "0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c",
-      "verifiedAt": "2026-09-19T19:28:07.253Z",
+      "verifiedAt": "2026-09-26T18:35:52.342Z",
       "createdAt": "2026-09-19T19:28:07.245Z"
     }
   ],
   "consents": [
     {
-      "id": "d911a476-2ec8-4b7a-9d7f-bf039a2015a8",
+      "id": "09319798-0438-47e0-a472-89aeeab75ac3",
       "patientId": "5b74d80a-50b4-4a91-92a5-3e81266b4c98",
       "providerId": "aa06f111-ba75-4212-996d-b0c6a382b006",
       "scope": [
         "records"
       ],
-      "grantedAt": "2026-09-19T19:28:07.262Z",
-      "status": "active"
+      "grantedAt": "2026-09-26T18:35:52.354Z",
+      "status": "active",
+      "revokedAt": null
     }
   ]
 }

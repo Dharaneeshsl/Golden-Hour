@@ -101,7 +101,7 @@ async function main() {
   upsertEnvFile(BACKEND_ENV, BACKEND_ENV_EXAMPLE, {
     ...addresses,
     RPC_URL: "http://127.0.0.1:8545",
-    BACKEND_PRIVATE_KEY: deployer.privateKey || process.env.BACKEND_PRIVATE_KEY || "",
+    BACKEND_PRIVATE_KEY: deployer.privateKey || process.env.BACKEND_PRIVATE_KEY || "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
   });
 
   // Frontend only needs the VITE_-prefixed addresses.
