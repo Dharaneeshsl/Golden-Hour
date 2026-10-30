@@ -103,8 +103,8 @@ function createDoctorController({ store, chain }) {
 
       const updated = await store.updateProvider(targetWallet, {
         status,
-        verifiedBy: status === "verified" ? canonicalizeWallet(req.user.wallet) : existing.verified_by,
-        verifiedAt: status === "verified" ? new Date().toISOString() : existing.verified_at,
+        verifiedBy: status === "verified" ? canonicalizeWallet(req.user.wallet) : (existing.verifiedBy || existing.verified_by || null),
+        verifiedAt: status === "verified" ? new Date().toISOString() : (existing.verifiedAt || existing.verified_at || null),
       });
 
       if (chain.enabled) {

@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { REASON_CODES } from "../config/i18n";
 
 export default function DoctorDashboard({ wallet }) {
   const [patientId, setPatientId] = useState("");
+  const [reasonCode, setReasonCode] = useState(REASON_CODES[0]?.code || "TRAUMA_UNRESPONSIVE");
+  const [facility, setFacility] = useState("");
   const [justification, setJustification] = useState(
-    "Unconscious trauma patient requires immediate critical history"
+    ""
   );
   const [provider, setProvider] = useState(null);
   const [activeConsents, setActiveConsents] = useState([]);
@@ -104,7 +107,7 @@ export default function DoctorDashboard({ wallet }) {
     setBusy(true);
     setError("");
     try {
-      const result = await api.emergency({ patientId, justification });
+      const result = await api.emergency({ patientId, justification, reasonCode, facility });
       const critical = await api.emergencyCritical(result.accessId);
       setNotice(`Emergency access valid until ${new Date(critical.expiresAt).toLocaleTimeString()}.`);
       setSelected({
@@ -244,7 +247,19 @@ export default function DoctorDashboard({ wallet }) {
               </button>
             </form>
 
-            <h3 className="subheading" style={{ marginTop: "2rem" }}>Break-Glass Emergency Access</h3>
+            <h3 className="subheading" style={{ marginTop: "2rem" }}>Break-Glass Emergency Access (v2)</h3>
+            <label>
+              Clinical Reason Code
+              <select value={reasonCode} onChange={(e) => setReasonCode(e.target.value)} style={{ marginBottom: "0.5rem" }}>
+                {REASON_CODES.map((r) => (
+                  <option key={r.code} value={r.code}>{r.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Facility / Hospital
+              <input value={facility} onChange={(e) => setFacility(e.target.value)} placeholder="Hospital name" style={{ marginBottom: "0.5rem" }} />
+            </label>
             <textarea
               value={justification}
               onChange={(e) => setJustification(e.target.value)}

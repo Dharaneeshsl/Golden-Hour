@@ -1,0 +1,7196 @@
+This file is a merged representation of a subset of the codebase, containing files not matching ignore patterns, combined into a single document by Repomix.
+The content has been processed where empty lines have been removed, security check has been disabled.
+
+# File Summary
+
+## Purpose
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+
+## File Format
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  a. A header with the file path (## File: path/to/file)
+  b. The full contents of the file in a code block
+
+## Usage Guidelines
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+
+## Notes
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching these patterns are excluded: **/package-lock.json, **/.data/**, **/dist/**, **/artifacts/**, **/cache/**, repomix-output.*, **/.github/**, **/*.log, **/.env, **/.env.*
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Empty lines have been removed from all files
+- Security check has been disabled - content may contain sensitive information
+- Files are sorted by Git change count (files with more changes are at the bottom)
+
+# Directory Structure
+````
+backend/
+  migrations/
+    001_initial.sql
+    002_consents.sql
+    003_indexes_and_perf.sql
+    004_production_schema_v2.sql
+  src/
+    config/
+      authConfig.js
+      contractConfig.js
+      db.js
+      migrate.js
+    controllers/
+      complianceController.js
+      consentController.js
+      doctorController.js
+      emergencyController.js
+      patientController.js
+      recordController.js
+    middleware/
+      authMiddleware.js
+      roleCheck.js
+    routes/
+      authRoutes.js
+      complianceRoutes.js
+      consentRoutes.js
+      doctorRoutes.js
+      emergencyRoutes.js
+      patientRoutes.js
+      recordRoutes.js
+    services/
+      auditChainService.js
+      chainService.js
+      encryptionService.js
+      envelopeEncryptionService.js
+      fhirService.js
+      ipfsService.js
+      notificationService.js
+    app.js
+  test/
+    app.test.js
+    postgres-migration.test.js
+    postgres-store.test.js
+    scaleup.test.js
+    services.test.js
+    smoke.test.js
+  .env.example
+  check.js
+  Dockerfile
+  package.json
+  README.md
+contracts/
+  interfaces/
+    IMedicalRecord.sol
+  AccessControl.sol
+  AuditLog.sol
+  EmergencyAccess.sol
+  MedicalRecord.sol
+  PatientRegistry.sol
+docs/
+  api.md
+  architecture.md
+  SCALE_UP_MASTER_TODO_TRACKER.md
+frontend/
+  src/
+    components/
+      AdminDashboard.jsx
+      ConsentManager.jsx
+      DoctorDashboard.jsx
+      emergencyComponents.test.jsx
+      EmergencyScanView.jsx
+      ErrorBoundary.jsx
+      PatientDashboard.jsx
+      PatientOnboarding.jsx
+      QRCodeCard.jsx
+      RecordTimeline.jsx
+      WalletConnectButton.jsx
+    config/
+      demoAccounts.js
+      i18n.js
+    hooks/
+      useContract.js
+    pages/
+      index.jsx
+      login.jsx
+    utils/
+      session.js
+      session.test.js
+      web3.js
+      web3.test.js
+    api.js
+    App.jsx
+    main.jsx
+    styles.css
+  .env.example
+  Dockerfile
+  index.html
+  package.json
+  vite.config.js
+scripts/
+  deploy.js
+  grantAccess.js
+  seedTestData.js
+  wireLocalDeployment.js
+test/
+  GoldenHour.test.js
+.env.example
+.gitignore
+docker-compose.yml
+hardhat.config.js
+package.json
+README.md
+repomix.config.json
+seed.js
+````
+
+# Files
+
+## File: backend/migrations/003_indexes_and_perf.sql
+````sql
+-- Migration 003: Performance and security indexes for scale-up (B18)
+CREATE INDEX IF NOT EXISTS idx_patients_lower_wallet ON patients (lower(wallet));
+CREATE INDEX IF NOT EXISTS idx_providers_lower_wallet ON providers (lower(wallet));
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs (actor);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_provider_id ON audit_logs (provider_id);
+````
+
+## File: backend/migrations/004_production_schema_v2.sql
+````sql
+-- Migration 004: Production Scale-Up Schema v2 (Phases 1-5)
+-- 1. Users, Identities & Server-side Sessions
+CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY,
+    full_name TEXT NOT NULL,
+    phone TEXT UNIQUE,
+    email TEXT UNIQUE,
+    abha_id TEXT UNIQUE,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS identities (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider_type TEXT NOT NULL, -- 'webauthn', 'phone_otp', 'abha', 'wallet'
+    identifier TEXT NOT NULL,
+    credential_data JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL,
+    ip_address TEXT,
+    user_agent TEXT,
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- 2. Organizations & Hospital Memberships
+CREATE TABLE IF NOT EXISTS organizations (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL,
+    reg_number TEXT UNIQUE NOT NULL,
+    org_type TEXT NOT NULL, -- 'hospital', 'trauma_center', 'ambulance_fleet', 'clinic'
+    address JSONB DEFAULT '{}'::jsonb,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS memberships (
+    id UUID PRIMARY KEY,
+    org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL, -- 'admin', 'trauma_doctor', 'emt_responder', 'nurse'
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(org_id, user_id)
+);
+-- 3. Granular Consent v2 with Receipts & Events
+CREATE TABLE IF NOT EXISTS consents_v2 (
+    id UUID PRIMARY KEY,
+    patient_id UUID NOT NULL,
+    provider_id UUID,
+    org_id UUID REFERENCES organizations(id),
+    purpose TEXT NOT NULL, -- 'EMERGENCY_TREATMENT', 'CONSULTATION', 'SECOND_OPINION'
+    scope JSONB NOT NULL,  -- e.g. ["allergies", "medications", "records"]
+    status TEXT NOT NULL DEFAULT 'active', -- 'active', 'revoked', 'expired'
+    granted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS consent_events (
+    id UUID PRIMARY KEY,
+    consent_id UUID REFERENCES consents_v2(id) ON DELETE CASCADE,
+    action TEXT NOT NULL, -- 'GRANTED', 'REVOKED', 'ACCESSED', 'EXPIRED'
+    actor TEXT NOT NULL,
+    payload JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- 4. Break-Glass v2 Events & Post-Hoc Compliance Reviews
+CREATE TABLE IF NOT EXISTS break_glass_events (
+    id UUID PRIMARY KEY,
+    patient_id UUID NOT NULL,
+    doctor_id UUID NOT NULL,
+    org_id UUID REFERENCES organizations(id),
+    reason_code TEXT NOT NULL, -- 'UNCONSCIOUS_TRAUMA', 'CARDIAC_ARREST', 'ANAPHYLAXIS', etc.
+    justification TEXT NOT NULL,
+    facility TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS break_glass_reviews (
+    id UUID PRIMARY KEY,
+    event_id UUID NOT NULL REFERENCES break_glass_events(id) ON DELETE CASCADE,
+    reviewer_id UUID NOT NULL,
+    decision TEXT NOT NULL CHECK(decision IN ('approved', 'flagged', 'investigation_required')),
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- 5. Hash-Chained Append-Only Audit Log
+CREATE TABLE IF NOT EXISTS audit_events (
+    id UUID PRIMARY KEY,
+    sequence_num BIGSERIAL,
+    patient_id UUID,
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    previous_hash TEXT NOT NULL,
+    current_hash TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- 6. Key Registry for KMS Envelope Encryption & Crypto-Shredding
+CREATE TABLE IF NOT EXISTS key_registry (
+    key_id TEXT PRIMARY KEY,
+    patient_id UUID NOT NULL,
+    algorithm TEXT NOT NULL DEFAULT 'aes-256-gcm',
+    encrypted_dek TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active', -- 'active', 'shredded', 'rotated'
+    rotated_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- 7. Secure Attachment File Metadata with Scan Status
+CREATE TABLE IF NOT EXISTS files (
+    id UUID PRIMARY KEY,
+    patient_id UUID NOT NULL,
+    object_key TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    file_size BIGINT NOT NULL,
+    scan_status TEXT NOT NULL DEFAULT 'clean', -- 'clean', 'scanning', 'quarantined'
+    checksum_sha256 TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- 8. Transactional Outbox for Anchor/Worker Delivery
+CREATE TABLE IF NOT EXISTS outbox (
+    id UUID PRIMARY KEY,
+    topic TEXT NOT NULL, -- 'BLOCKCHAIN_ANCHOR', 'SMS_NOTIFICATION', 'ABDM_DISPATCH'
+    payload JSONB NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'sent', 'failed'
+    retries INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- 9. DPDP Act 2023 Data Subject Rights (DSR) & Grievance Tracking
+CREATE TABLE IF NOT EXISTS data_subject_requests (
+    id UUID PRIMARY KEY,
+    patient_id UUID NOT NULL,
+    request_type TEXT NOT NULL CHECK(request_type IN ('access', 'correction', 'erasure', 'grievance')),
+    details TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'submitted', -- 'submitted', 'in_review', 'completed', 'rejected'
+    resolution_notes TEXT,
+    resolved_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- 10. Transient Rotatable QR Tokens
+CREATE TABLE IF NOT EXISTS qr_tokens (
+    id UUID PRIMARY KEY,
+    patient_id UUID NOT NULL,
+    token_hash TEXT UNIQUE NOT NULL,
+    expires_at TIMESTAMPTZ,
+    is_revoked BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- Indexes for high-throughput query performance
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_consents_v2_patient ON consents_v2(patient_id);
+CREATE INDEX IF NOT EXISTS idx_consents_v2_status ON consents_v2(status);
+CREATE INDEX IF NOT EXISTS idx_break_glass_patient ON break_glass_events(patient_id);
+CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status);
+CREATE INDEX IF NOT EXISTS idx_qr_tokens_hash ON qr_tokens(token_hash);
+````
+
+## File: backend/src/controllers/complianceController.js
+````javascript
+const crypto = require("crypto");
+const { buildIPSBundle } = require("../services/fhirService");
+const { canonicalizeWallet } = require("../config/db");
+function createComplianceController({ store }) {
+  return {
+    exportData: async (req, res) => {
+      try {
+        const patientId = req.params.patientId;
+        const patient = await store.patientById(patientId);
+        if (!patient) return res.status(404).json({ error: "Patient not found" });
+        // Lock down: Only the patient themselves can export their own records
+        const callerWallet = canonicalizeWallet(req.user?.wallet);
+        const ownerWallet = canonicalizeWallet(patient.wallet);
+        const isOwner = callerWallet && ownerWallet && callerWallet === ownerWallet;
+        const hasPatientIdMatch = req.user?.patientId && req.user.patientId === patient.id;
+        if (!isOwner && !hasPatientIdMatch) {
+          return res.status(403).json({
+            error: "Access denied: Patients are strictly authorized to export only their own clinical data",
+          });
+        }
+        // Build FHIR R4 Bundle
+        const fhirBundle = buildIPSBundle(patient);
+        res.json(fhirBundle);
+      } catch (err) {
+        console.error("Compliance export error:", err);
+        res.status(500).json({ error: "Failed to export FHIR patient data" });
+      }
+    },
+    submitDSR: async (req, res) => {
+      try {
+        const callerWallet = canonicalizeWallet(req.user?.wallet);
+        if (!callerWallet) {
+          return res.status(401).json({ error: "Authenticated wallet identity required" });
+        }
+        // Strictly extract patientId from authenticated token or database lookup by caller wallet
+        let patient = null;
+        if (req.user?.patientId) {
+          patient = await store.patientById(req.user.patientId);
+        }
+        if (!patient) {
+          patient = await store.patientByWallet(callerWallet);
+        }
+        if (!patient) {
+          return res.status(403).json({
+            error: "Access denied: Data Subject Requests can only be submitted by registered patients",
+          });
+        }
+        const patientId = patient.id;
+        const { requestType, details } = req.body || {};
+        const validTypes = ["access", "correction", "grievance"];
+        if (requestType === "erasure") {
+          return res.status(400).json({
+            error: "Automated erasure request is temporarily disabled pending Step 4 legal-hold verification and persistent KMS implementation",
+          });
+        }
+        if (!validTypes.includes(requestType)) {
+          return res.status(400).json({
+            error: `requestType must be one of: ${validTypes.join(", ")}`,
+          });
+        }
+        const dsrRecord = {
+          id: crypto.randomUUID(),
+          patientId,
+          requestType,
+          details: details || "Statutory Data Principal Request",
+          status: "submitted",
+          createdAt: new Date().toISOString(),
+        };
+        await store.addAudit({
+          id: crypto.randomUUID(),
+          patientId,
+          actor: callerWallet,
+          action: `DSR_REQUEST_${requestType.toUpperCase()}`,
+          metadata: { dsrId: dsrRecord.id, requestType },
+          timestamp: new Date().toISOString(),
+        });
+        res.status(201).json({
+          message: "Data Subject Request successfully received and queued for statutory processing.",
+          dsr: dsrRecord,
+        });
+      } catch (err) {
+        console.error("Compliance DSR error:", err);
+        res.status(500).json({ error: "Failed to submit Data Subject Request" });
+      }
+    },
+    executeErasure: async (req, res) => {
+      // Step 1 mandate: disable erasure route until Step 4 (legal-hold check & persistent KMS) is completed
+      return res.status(503).json({
+        error: "Erasure endpoint is disabled pending Step 4 legal-hold check and cryptographic key registry integration",
+      });
+    },
+  };
+}
+module.exports = { createComplianceController };
+````
+
+## File: backend/src/routes/complianceRoutes.js
+````javascript
+const express = require("express");
+const { requireAuth } = require("../middleware/authMiddleware");
+module.exports = (controller) => {
+  const router = express.Router();
+  // Export: strictly limited to the patient themselves
+  router.get("/export/:patientId", requireAuth, controller.exportData);
+  // DSR: strictly authenticated patient only, patientId derived from token
+  router.post("/dsr", requireAuth, controller.submitDSR);
+  // Erasure: disabled pending Step 4 legal-hold verification
+  router.post("/erasure/:patientId", requireAuth, controller.executeErasure);
+  return router;
+};
+````
+
+## File: backend/src/services/auditChainService.js
+````javascript
+const crypto = require("crypto");
+/**
+ * Hash-Chained Audit & Merkle Root Anchoring Service
+ * 
+ * - Computes forward-chained SHA-256 hashes: H_n = SHA256(H_{n-1} || payload)
+ * - Detects tampering across any historical audit record
+ * - Builds Merkle trees for blockchain anchoring (Option B)
+ */
+class AuditChainService {
+  constructor() {
+    this.genesisHash = "0000000000000000000000000000000000000000000000000000000000000000";
+    this.chain = [];
+  }
+  getLatestHash() {
+    if (this.chain.length === 0) return this.genesisHash;
+    return this.chain[this.chain.length - 1].currentHash;
+  }
+  appendAuditEvent({ id, patientId, actor, action, details = {}, timestamp = new Date().toISOString() }) {
+    const previousHash = this.getLatestHash();
+    const payload = JSON.stringify({
+      id,
+      patientId,
+      actor,
+      action,
+      details,
+      timestamp,
+      previousHash,
+    });
+    const currentHash = crypto.createHash("sha256").update(payload).digest("hex");
+    const entry = {
+      id: id || crypto.randomUUID(),
+      sequenceNum: this.chain.length + 1,
+      patientId,
+      actor,
+      action,
+      details,
+      previousHash,
+      currentHash,
+      timestamp,
+    };
+    this.chain.push(entry);
+    return entry;
+  }
+  verifyChainIntegrity() {
+    for (let i = 0; i < this.chain.length; i++) {
+      const entry = this.chain[i];
+      const expectedPrev = i === 0 ? this.genesisHash : this.chain[i - 1].currentHash;
+      if (entry.previousHash !== expectedPrev) {
+        return { valid: false, brokenAtSequence: entry.sequenceNum, reason: "Previous hash mismatch" };
+      }
+      const payload = JSON.stringify({
+        id: entry.id,
+        patientId: entry.patientId,
+        actor: entry.actor,
+        action: entry.action,
+        details: entry.details,
+        timestamp: entry.timestamp,
+        previousHash: entry.previousHash,
+      });
+      const recalculated = crypto.createHash("sha256").update(payload).digest("hex");
+      if (recalculated !== entry.currentHash) {
+        return { valid: false, brokenAtSequence: entry.sequenceNum, reason: "Current hash recalculation failed" };
+      }
+    }
+    return { valid: true, totalEntries: this.chain.length };
+  }
+  /**
+   * Generates a Merkle Root from an array of audit hashes for on-chain anchoring
+   */
+  generateMerkleRoot(hashes = this.chain.map((c) => c.currentHash)) {
+    if (hashes.length === 0) return this.genesisHash;
+    let currentLevel = [...hashes];
+    while (currentLevel.length > 1) {
+      const nextLevel = [];
+      for (let i = 0; i < currentLevel.length; i += 2) {
+        const left = currentLevel[i];
+        const right = i + 1 < currentLevel.length ? currentLevel[i + 1] : left;
+        const combined = crypto.createHash("sha256").update(left + right).digest("hex");
+        nextLevel.push(combined);
+      }
+      currentLevel = nextLevel;
+    }
+    return currentLevel[0];
+  }
+}
+module.exports = {
+  AuditChainService,
+  auditChain: new AuditChainService(),
+};
+````
+
+## File: backend/src/services/envelopeEncryptionService.js
+````javascript
+const crypto = require("crypto");
+/**
+ * Envelope Encryption Service for Healthcare Data (AES-256-GCM + KMS Wrap)
+ * 
+ * - Generates unique per-patient Data Encryption Keys (DEKs)
+ * - Wraps DEKs with a Key Management Service (KMS) Root Key
+ * - Binds ciphertext to Authenticated Additional Data (AAD): { patientId, recordId, version }
+ * - Supports Crypto-Shredding (deleting the DEK renders all ciphertexts permanently unreadable)
+ */
+class EnvelopeEncryptionService {
+  constructor(masterKeyHex = process.env.KMS_MASTER_KEY) {
+    if (!masterKeyHex) {
+      // Default to deterministic derivation from ENCRYPTION_KEY if KMS_MASTER_KEY is not explicitly passed
+      const baseKey = process.env.ENCRYPTION_KEY || "goldenhour-master-key-seed-value";
+      this.masterKey = crypto.createHash("sha256").update(baseKey).digest();
+    } else {
+      this.masterKey = Buffer.from(masterKeyHex, "hex");
+    }
+    // In-memory key registry fallback for unit testing / local instances
+    this.keyStore = new Map();
+  }
+  /**
+   * Generates and wraps a fresh 256-bit DEK for a patient
+   */
+  generatePatientDEK(patientId) {
+    const rawDEK = crypto.randomBytes(32);
+    const keyId = `key_${crypto.randomBytes(8).toString("hex")}_${Date.now()}`;
+    // Encrypt DEK with Master KMS Key
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", this.masterKey, iv);
+    const wrappedDEK = Buffer.concat([cipher.update(rawDEK), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    const record = {
+      keyId,
+      patientId,
+      algorithm: "aes-256-gcm",
+      iv: iv.toString("base64"),
+      tag: tag.toString("base64"),
+      encryptedDEK: wrappedDEK.toString("base64"),
+      status: "active",
+      createdAt: new Date().toISOString(),
+    };
+    this.keyStore.set(patientId, { ...record, rawDEK });
+    return record;
+  }
+  /**
+   * Retrieves and unwraps the raw DEK for a patient
+   */
+  unwrapPatientDEK(patientId) {
+    const record = this.keyStore.get(patientId);
+    if (!record) {
+      // Generate lazily if not present
+      this.generatePatientDEK(patientId);
+      return this.keyStore.get(patientId).rawDEK;
+    }
+    if (record.status === "shredded") {
+      throw new Error("Crypto-shredded: Patient data encryption key has been permanently destroyed");
+    }
+    if (record.rawDEK) return record.rawDEK;
+    const decipher = crypto.createDecipheriv(
+      "aes-256-gcm",
+      this.masterKey,
+      Buffer.from(record.iv, "base64")
+    );
+    decipher.setAuthTag(Buffer.from(record.tag, "base64"));
+    return Buffer.concat([
+      decipher.update(Buffer.from(record.encryptedDEK, "base64")),
+      decipher.final(),
+    ]);
+  }
+  /**
+   * Encrypts clinical JSON bound to Authenticated Additional Data (AAD)
+   */
+  encryptField(patientId, plainValue, aadContext = {}) {
+    const dek = this.unwrapPatientDEK(patientId);
+    const record = this.keyStore.get(patientId);
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", dek, iv);
+    const aadBuffer = Buffer.from(JSON.stringify(aadContext));
+    cipher.setAAD(aadBuffer);
+    const serialized = typeof plainValue === "string" ? plainValue : JSON.stringify(plainValue);
+    const ciphertext = Buffer.concat([cipher.update(serialized, "utf8"), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return {
+      version: 2,
+      algorithm: "aes-256-gcm",
+      keyId: record.keyId,
+      iv: iv.toString("base64"),
+      tag: tag.toString("base64"),
+      ciphertext: ciphertext.toString("base64"),
+      aad: aadContext,
+    };
+  }
+  /**
+   * Decrypts clinical JSON payload, validating AAD authentication
+   */
+  decryptField(patientId, payload) {
+    if (!payload || payload.algorithm !== "aes-256-gcm") {
+      throw new Error("Unsupported encrypted payload specification");
+    }
+    const dek = this.unwrapPatientDEK(patientId);
+    const decipher = crypto.createDecipheriv(
+      "aes-256-gcm",
+      dek,
+      Buffer.from(payload.iv, "base64")
+    );
+    decipher.setAuthTag(Buffer.from(payload.tag, "base64"));
+    if (payload.aad) {
+      decipher.setAAD(Buffer.from(JSON.stringify(payload.aad)));
+    }
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(payload.ciphertext, "base64")),
+      decipher.final(),
+    ]).toString("utf8");
+    try {
+      return JSON.parse(decrypted);
+    } catch {
+      return decrypted;
+    }
+  }
+  /**
+   * Crypto-shreds all patient data by destroying the patient DEK
+   */
+  cryptoShred(patientId) {
+    const record = this.keyStore.get(patientId);
+    if (record) {
+      record.status = "shredded";
+      delete record.rawDEK;
+      record.encryptedDEK = "";
+      return true;
+    }
+    return false;
+  }
+}
+module.exports = {
+  EnvelopeEncryptionService,
+  envelopeEncryption: new EnvelopeEncryptionService(),
+};
+````
+
+## File: backend/src/services/fhirService.js
+````javascript
+/**
+ * HL7 FHIR Release 4 & International Patient Summary (IPS) Serializer
+ * 
+ * Maps GoldenHour patient profile and critical emergency metadata
+ * into standardized FHIR R4 JSON resources for ABDM and hospital EHR exchange.
+ */
+function toFhirPatient(patient) {
+  const profile = patient.profile || {};
+  return {
+    resourceType: "Patient",
+    id: patient.id,
+    identifier: [
+      {
+        system: "https://goldenhour.health/patients",
+        value: patient.id,
+      },
+      {
+        system: "https://ethereum.org/address",
+        value: patient.wallet,
+      },
+    ],
+    active: true,
+    name: [
+      {
+        use: "official",
+        text: profile.fullName || "Anonymous Patient",
+      },
+    ],
+    telecom: profile.phone
+      ? [
+          {
+            system: "phone",
+            value: profile.phone,
+            use: "mobile",
+          },
+        ]
+      : [],
+    gender: (profile.gender || "unknown").toLowerCase(),
+  };
+}
+function toFhirAllergies(patientId, allergies = []) {
+  return allergies.map((allergy, idx) => ({
+    resourceType: "AllergyIntolerance",
+    id: `allergy-${patientId}-${idx}`,
+    clinicalStatus: {
+      coding: [
+        {
+          system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+          code: "active",
+        },
+      ],
+    },
+    verificationStatus: {
+      coding: [
+        {
+          system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+          code: "confirmed",
+        },
+      ],
+    },
+    patient: {
+      reference: `Patient/${patientId}`,
+    },
+    code: {
+      text: allergy,
+    },
+    criticality: "high",
+  }));
+}
+function toFhirConditions(patientId, conditions = []) {
+  return conditions.map((condition, idx) => ({
+    resourceType: "Condition",
+    id: `condition-${patientId}-${idx}`,
+    clinicalStatus: {
+      coding: [
+        {
+          system: "http://terminology.hl7.org/CodeSystem/condition-clinical",
+          code: "active",
+        },
+      ],
+    },
+    verificationStatus: {
+      coding: [
+        {
+          system: "http://terminology.hl7.org/CodeSystem/condition-ver-status",
+          code: "confirmed",
+        },
+      ],
+    },
+    subject: {
+      reference: `Patient/${patientId}`,
+    },
+    code: {
+      text: condition,
+    },
+  }));
+}
+function buildIPSBundle(patient, records = []) {
+  const fhirPatient = toFhirPatient(patient);
+  const critical = patient.critical || {};
+  const allergies = toFhirAllergies(patient.id, critical.allergies || []);
+  const conditions = toFhirConditions(patient.id, critical.conditions || []);
+  const entries = [
+    { resource: fhirPatient },
+    ...allergies.map((a) => ({ resource: a })),
+    ...conditions.map((c) => ({ resource: c })),
+  ];
+  return {
+    resourceType: "Bundle",
+    id: `ips-bundle-${patient.id}`,
+    type: "document",
+    timestamp: new Date().toISOString(),
+    entry: entries,
+    meta: {
+      profile: ["http://hl7.org/fhir/uv/ips/StructureDefinition/Bundle-uv-ips"],
+    },
+  };
+}
+module.exports = {
+  toFhirPatient,
+  toFhirAllergies,
+  toFhirConditions,
+  buildIPSBundle,
+};
+````
+
+## File: backend/src/services/notificationService.js
+````javascript
+/**
+ * Emergency Notification Service
+ * 
+ * Records break-glass emergency alert events.
+ * Returns LOGGED_ONLY until a production SMS/telephony provider (e.g. Twilio/Karix) is integrated.
+ */
+class NotificationService {
+  constructor() {
+    this.outbox = [];
+  }
+  async sendEmergencyAlert({ patientId, patientPhone, emergencyContact, doctorName, facility, reasonCode }) {
+    const timestamp = new Date().toISOString();
+    const alertMessage = `🚨 URGENT: GoldenHour Emergency Access triggered for your medical record at ${facility || "Emergency Facility"} by ${doctorName || "Verified Clinician"}. Reason: ${reasonCode || "TRAUMA_UNRESPONSIVE"}. If this was unauthorized, contact hospital administration immediately.`;
+    const notifications = [
+      {
+        id: `notif-${Date.now()}-1`,
+        patientId,
+        recipient: patientPhone || "Patient Primary Channel",
+        type: "SMS",
+        message: alertMessage,
+        status: "LOGGED_ONLY",
+        timestamp,
+      },
+    ];
+    if (emergencyContact) {
+      notifications.push({
+        id: `notif-${Date.now()}-2`,
+        patientId,
+        recipient: emergencyContact,
+        type: "SMS",
+        message: `🚨 ALERT: Your registered emergency contact's medical history was accessed during trauma triage at ${facility || "Emergency Facility"}. Reason: ${reasonCode || "TRAUMA_UNRESPONSIVE"}.`,
+        status: "LOGGED_ONLY",
+        timestamp,
+      });
+    }
+    this.outbox.push(...notifications);
+    console.log(`[NotificationService] Logged ${notifications.length} emergency alerts for patient ${patientId} (status: LOGGED_ONLY - SMS gateway pending)`);
+    return notifications;
+  }
+  getRecentNotifications(patientId) {
+    return this.outbox.filter((n) => !patientId || n.patientId === patientId);
+  }
+}
+module.exports = {
+  NotificationService,
+  notificationService: new NotificationService(),
+};
+````
+
+## File: backend/test/scaleup.test.js
+````javascript
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { envelopeEncryption } = require("../src/services/envelopeEncryptionService");
+const { auditChain } = require("../src/services/auditChainService");
+const { toFhirPatient, toFhirAllergies, buildIPSBundle } = require("../src/services/fhirService");
+const { notificationService } = require("../src/services/notificationService");
+const { createComplianceController } = require("../src/controllers/complianceController");
+test("Scale-Up: Envelope Encryption with per-patient DEK and AAD binding works", () => {
+  const patientId = "patient-uuid-scaleup-001";
+  const clinicalPayload = {
+    bloodGroup: "O+",
+    allergies: ["Penicillin", "Peanuts"],
+    chronicConditions: ["Asthma"],
+    vitals: { bp: "120/80", hr: 72 },
+  };
+  const aad = { patientId, recordId: "rec-001", version: 2 };
+  const encrypted = envelopeEncryption.encryptField(patientId, clinicalPayload, aad);
+  assert.equal(encrypted.version, 2);
+  assert.equal(encrypted.algorithm, "aes-256-gcm");
+  assert.ok(encrypted.iv);
+  assert.ok(encrypted.tag);
+  assert.ok(encrypted.ciphertext);
+  // Decrypt with valid AAD
+  const decrypted = envelopeEncryption.decryptField(patientId, encrypted);
+  assert.deepEqual(decrypted, clinicalPayload);
+  // Crypto-shredding test
+  const shredded = envelopeEncryption.cryptoShred(patientId);
+  assert.equal(shredded, true);
+  // Verify that subsequent decryption is mathematically impossible
+  assert.throws(
+    () => envelopeEncryption.decryptField(patientId, encrypted),
+    /Crypto-shredded/
+  );
+});
+test("Scale-Up: Hash-chained audit log maintains tamper-evidence and generates Merkle root", () => {
+  const event1 = auditChain.appendAuditEvent({
+    id: "audit-001",
+    patientId: "p-001",
+    actor: "0xDoctorWallet1",
+    action: "EMERGENCY_BREAK_GLASS",
+    details: { reasonCode: "UNCONSCIOUS_TRAUMA" },
+  });
+  const event2 = auditChain.appendAuditEvent({
+    id: "audit-002",
+    patientId: "p-001",
+    actor: "0xDoctorWallet1",
+    action: "CRITICAL_VIEW",
+    details: { viewDurationMs: 420 },
+  });
+  assert.ok(event1.currentHash);
+  assert.equal(event2.previousHash, event1.currentHash);
+  const integrityCheck = auditChain.verifyChainIntegrity();
+  assert.equal(integrityCheck.valid, true);
+  // Generate 32-byte Merkle Root for blockchain anchoring
+  const merkleRoot = auditChain.generateMerkleRoot();
+  assert.ok(merkleRoot);
+  assert.equal(merkleRoot.length, 64); // 32-byte hex string
+});
+test("Scale-Up: FHIR R4 International Patient Summary (IPS) bundle serialization", () => {
+  const patient = {
+    id: "p-fhir-999",
+    wallet: "0x1111111111111111111111111111111111111111",
+    profile: {
+      fullName: "Ananya Sharma",
+      gender: "Female",
+      phone: "+91-9876543210",
+    },
+    critical: {
+      bloodGroup: "B+",
+      allergies: ["Sulfa Drugs", "Aspirin"],
+      conditions: ["Type 1 Diabetes"],
+    },
+  };
+  const bundle = buildIPSBundle(patient);
+  assert.equal(bundle.resourceType, "Bundle");
+  assert.equal(bundle.type, "document");
+  assert.ok(bundle.entry.length >= 3); // Patient + 2 allergies + 1 condition
+  const patientEntry = bundle.entry.find((e) => e.resource.resourceType === "Patient");
+  assert.equal(patientEntry.resource.name[0].text, "Ananya Sharma");
+  const allergyEntry = bundle.entry.find(
+    (e) => e.resource.resourceType === "AllergyIntolerance" && e.resource.code.text === "Sulfa Drugs"
+  );
+  assert.ok(allergyEntry);
+  assert.equal(allergyEntry.resource.criticality, "high");
+});
+test("Scale-Up: Emergency notification dispatcher returns LOGGED_ONLY until SMS provider connected", async () => {
+  const alerts = await notificationService.sendEmergencyAlert({
+    patientId: "p-alert-001",
+    patientPhone: "+91-9876543210",
+    emergencyContact: "+91-9876500000",
+    doctorName: "Dr. Arvind Swaminathan",
+    facility: "Coimbatore Medical Center Trauma Ward",
+    reasonCode: "CARDIAC_ARREST",
+  });
+  assert.equal(alerts.length, 2);
+  assert.equal(alerts[0].type, "SMS");
+  assert.equal(alerts[0].status, "LOGGED_ONLY");
+  assert.ok(alerts[0].message.includes("CARDIAC_ARREST"));
+  assert.ok(alerts[1].message.includes("emergency contact"));
+});
+test("Scale-Up: Compliance route lockdown enforces patient authorization, token ID derivation, and disabled erasure", async () => {
+  const mockStore = {
+    patientById: async (id) => (id === "p-123" ? { id: "p-123", wallet: "0x1111111111111111111111111111111111111111", profile: {}, critical: {} } : null),
+    patientByWallet: async (w) => (w.toLowerCase() === "0x1111111111111111111111111111111111111111".toLowerCase() ? { id: "p-123", wallet: "0x1111111111111111111111111111111111111111" } : null),
+    addAudit: async () => {},
+  };
+  const controller = createComplianceController({ store: mockStore });
+  // 1. Export unauthorized check (caller is different wallet)
+  let statusSet = null;
+  let jsonResult = null;
+  const mockRes = {
+    status: (s) => { statusSet = s; return mockRes; },
+    json: (j) => { jsonResult = j; return mockRes; },
+  };
+  await controller.exportData(
+    { params: { patientId: "p-123" }, user: { wallet: "0x9999999999999999999999999999999999999999", role: "patient" } },
+    mockRes
+  );
+  assert.equal(statusSet, 403);
+  assert.ok(jsonResult.error.includes("strictly authorized to export only their own clinical data"));
+  // 2. Export authorized check (caller is owner)
+  statusSet = 200;
+  await controller.exportData(
+    { params: { patientId: "p-123" }, user: { wallet: "0x1111111111111111111111111111111111111111", patientId: "p-123", role: "patient" } },
+    mockRes
+  );
+  assert.equal(jsonResult.resourceType, "Bundle");
+  // 3. DSR ignores req.body.patientId and uses token / caller patient lookup
+  statusSet = null;
+  await controller.submitDSR(
+    {
+      body: { patientId: "p-fake-spoofed-id", requestType: "access", details: "Access my records" },
+      user: { wallet: "0x1111111111111111111111111111111111111111", patientId: "p-123", role: "patient" },
+    },
+    mockRes
+  );
+  assert.equal(statusSet, 201);
+  assert.equal(jsonResult.dsr.patientId, "p-123"); // Proven not spoofed to p-fake-spoofed-id!
+  // 4. Erasure is disabled with 503
+  statusSet = null;
+  await controller.executeErasure({ params: { patientId: "p-123" } }, mockRes);
+  assert.equal(statusSet, 503);
+  assert.ok(jsonResult.error.includes("disabled pending Step 4"));
+});
+````
+
+## File: docs/SCALE_UP_MASTER_TODO_TRACKER.md
+````markdown
+# 🏥 GoldenHour: Engineering Remediation & Scale-Up Tracker
+
+> **Tracking Framework:** Seven-Step Remediation Plan (Honest Status Model)  
+> **Status Taxonomy:** **Done** (verified by unit/integration test, CI check, or deployed code) | **Partial** (scaffolded/in-progress) | **Not started** (backlog)  
+> **Last Verified:** October 30, 2026 · Automated Test Suite Passing (19 Backend + 7 Frontend + 6 Smart Contract)
+
+---
+
+## 📊 Live Verification Baseline
+
+```
+================================================================================
+  GOLDENHOUR ENGINE BENCHMARK: 100% SUITE PASSING
+================================================================================
+  [Done] Solidity Smart Contracts : 6 / 6 PASSING   (Hardhat EVM test suite)
+  [Done] Backend Syntax Validator : 27 / 27 PASSING (All 27 production files)
+  [Done] Backend Integration Suite: 19 / 19 PASSING (Auth, Crypto, DB, Emergency,
+                                                    Envelope Encryption, Hash Chain,
+                                                    FHIR R4 Serializer, Compliance Lockdown)
+  [Done] Frontend Unit Tests      : 7 / 7 PASSING   (Vitest Suite including SSR render)
+  [Done] Frontend Production Build: SUCCESS         (Vite v5.4.21 bundle clean)
+  [Done] Production Migrations    : 001, 002, 003, 004 (Schema v2, 15 tables)
+================================================================================
+```
+
+---
+
+## 📋 Seven-Step Remediation Roadmap
+
+### Step 1: Stop the breakage (this week)
+- [Done] **Emergency UI State Declaration**: Declared `reasonCode` and `facility` state in `DoctorDashboard.jsx` and `EmergencyScanView.jsx`, and added clinical reason select and facility input fields to the emergency view. *(Proof: `frontend/src/components/emergencyComponents.test.jsx`)*
+- [Done] **FHIR Export Button**: Added the FHIR R4 IPS export button by hand to `PatientDashboard.jsx`. *(Proof: Verified in component JSX and production build)*
+- [Done] **Emergency Component Render Tests**: Added frontend test that renders both emergency components via `renderToString`, guaranteeing any undeclared state or syntax crash fails CI. *(Proof: `frontend/src/components/emergencyComponents.test.jsx` passes 2/2)*
+- [Done] **Lock down `/api/compliance/*`**:
+  - Export: Strictly authorized to the patient themselves; verified caller wallet and patientId match target. *(Proof: `backend/test/scaleup.test.js`)*
+  - DSR: Strictly authorized patients only, with `patientId` derived directly from authenticated token/database lookup, ignoring request body. *(Proof: `backend/test/scaleup.test.js`)*
+  - Erasure: Disabled with HTTP 503 pending Step 4 legal-hold verification and persistent KMS integration. *(Proof: `backend/test/scaleup.test.js`)*
+- [Done] **Grievance Officer Persona Remediation**: Removed the placeholder grievance officer endpoint (`/api/compliance/grievance-officer`) to eliminate invented persona until formal DPO appointment in Step 6.
+- [Done] **Production SSL & CA Enforcement**: Set `DB_REJECT_UNAUTHORIZED` to `true` by default and enforce mandatory `DB_CA` file in production when `DB_SSL=true`. *(Proof: `getDbSslConfig` in `backend/src/config/db.js` and `backend/src/config/migrate.js`)*
+- [Done] **Dedicated Client Migration Advisory Lock**: Refactored migration runner to acquire dedicated connection client from pool, executing advisory lock, schema migrations, and unlock on that single connection. *(Proof: `backend/src/config/migrate.js`)*
+- [Done] **Realistic Notification Status**: Changed `notificationService` to return `LOGGED_ONLY` status until a real SMS/telephony provider (e.g. Twilio/Karix) is connected. *(Proof: `backend/test/scaleup.test.js`)*
+
+---
+
+### Step 2: Finish the demo and dev cleanup (R1 to R16)
+- [Partial] Delete the demo sign-in code in `authRoutes.js`, along with `DEMO_WALLETS` and `DEMO_LOGIN_ENABLED`. *(Flagged by `ALLOW_DEMO_LOGIN=false` in prod; code deletion pending)*
+- [Not started] Delete `demoAccounts.js`, the demo buttons in `login.jsx`, and the `isDemoWallet` check in `App.jsx`.
+- [Not started] Delete `seed.js` and `scripts/seedTestData.js`.
+- [Partial] Remove `DEFAULT_DEMO_ADMINS` and `ALLOW_DEMO_LOGIN` from every `.env.example` and from `docker-compose.yml`.
+- [Not started] Remove the hardcoded Hardhat key from `wireLocalDeployment.js`, and make the script refuse non-local networks.
+- [Partial] Delete dev JWT and encryption fallbacks, and duplicate `secret()` in `authRoutes.js`.
+- [Partial] Delete the IPFS mock and `JsonStore`. Change tests to use a real Postgres container.
+- [Not started] Split `docker-compose.yml` into a dev-only file.
+- [Partial] Add a startup config check that refuses weak or placeholder secrets.
+- [Not started] Add a CI grep that fails on `DEMO_`, `demoAccounts` and `local-development-secret`.
+- [Not started] Rewrite `README.md` and `docs/api.md` to match reality. Remove "production-grade" claims and personal file paths.
+
+---
+
+### Step 3: Make the security bugs real fixes
+- [Partial] Add an async error wrapper, or move to Express 5 (B8).
+- [Not started] Move nonces, rate limits and sessions to Redis (B9).
+- [Not started] Add SIWE (EIP-4361) for wallet sign-in (B10).
+- [Partial] Use short access tokens (15m implemented), rotating refresh cookies and server-side revocation. Remove `localStorage` tokens (B11).
+- [Not started] Remove admin access to decrypt records and to list all patients (B5).
+- [Partial] Encrypt stored emergency justification (B6) and display to patient.
+- [Partial] Add rate limit per provider on break-glass requests, and a review queue (B7 schema added in migration 004).
+- [Partial] Add expiry and purpose to consent (B17 schema added in migration 004).
+- [Partial] Add transactional outbox for chain writes (B13 schema added in migration 004).
+- [Partial] Add pagination to every list endpoint (B18 indexes added in migration 003).
+- [Not started] Remove chain metadata (record type, doctor, CID). Use anchoring only, or drop the chain (B15, B4).
+
+---
+
+### Step 4: Make encryption and audit real
+- [Partial] Store wrapped keys in `key_registry` table (schema created in migration 004) and fetch from database rather than in-memory `Map`.
+- [Not started] Use real cloud KMS (AWS KMS / GCP Cloud KMS / HashiCorp Vault) for the master key. Remove deterministic fallback from `ENCRYPTION_KEY`.
+- [Partial] Wire envelope encryption into record, patient `profile` and `critical` paths (B2, B3; service built & tested in `envelopeEncryptionService.js`).
+- [Not started] Migrate existing data to new encryption, and test key rotation.
+- [Partial] Implement erasure properly, then re-enable endpoint. Run only after legal-hold check with immutable audit entry.
+- [Partial] Persist hash-chained audit log in `audit_events` table (service built & tested in `auditChainService.js`, schema in 004).
+- [Partial] Remove cascade deletes and revoke `UPDATE` and `DELETE` on audit tables.
+- [Partial] Add a worker that anchors Merkle root on schedule (Merkle calculation built & tested in `auditChainService.js`).
+- [Not started] Move record storage from Pinata to S3-compatible storage with SSE-KMS and object lock (B21).
+
+---
+
+### Step 5: Proof that it all works
+- [Not started] Add generated authorization matrix test: every role × endpoint × consent state.
+- [Partial] Add Postgres integration tests for every store method and migration (migrations 001-004 validated).
+- [Not started] Add Playwright end-to-end tests for patient, doctor, emergency and admin flows.
+- [Partial] Add regression tests for B1, B12, compliance authorization hole and emergency crash (B12 & emergency crash tests passing).
+- [Not started] Add ESLint, type checker, Dependabot, secret scanning, SAST and container scan to CI.
+- [Not started] Run load test on emergency path and restore drill.
+
+---
+
+### Step 6: The parts code can't finish (Organizational & Legal)
+- [Not started] Hire or appoint a Data Protection Officer (DPO) and Clinical Safety Officer (CSO).
+- [Not started] Obtain formal legal opinions on DPDP Act 2023, ABDM M1/M2/M3, CERT-In cybersecurity directives, and CDSCO SaMD classification.
+- [Not started] Conduct Data Protection Impact Assessment (DPIA), and draft statutory Privacy Policy and Terms of Service.
+- [Not started] Commission an external, independent CREST/CERT-In accredited penetration test.
+- [Not started] Select production cloud provider (AWS/GCP/Azure) and identity provider, and write production Terraform modules.
+- [Not started] Register for ABDM Sandbox and complete milestone verification.
+- [Not started] Secure commercial cyber insurance policy covering clinical data breaches and ransomware.
+- [Not started] Conduct live clinical pilot with a partner hospital using formal patient consent.
+
+---
+
+### Step 7: Tracker Governance
+- [Done] Replaced blanket `[x]` marks with honest **Done**, **Partial**, and **Not started** states.
+- [Done] Enforced strict evidence gate: Items are only marked **Done** when verified by passing automated tests, compiler checks, or deployed code.
+````
+
+## File: frontend/src/components/emergencyComponents.test.jsx
+````javascript
+import { describe, it, expect, beforeEach } from "vitest";
+import React from "react";
+import { renderToString } from "react-dom/server";
+import DoctorDashboard from "./DoctorDashboard.jsx";
+import EmergencyScanView from "./EmergencyScanView.jsx";
+describe("Emergency Frontend Components Rendering", () => {
+  it("renders DoctorDashboard without ReferenceError or rendering crash", () => {
+    const html = renderToString(
+      React.createElement(DoctorDashboard, { wallet: "0x1111111111111111111111111111111111111111" })
+    );
+    expect(html).toBeTruthy();
+    expect(html).toContain("Clinician Portal");
+  });
+  it("renders EmergencyScanView with clinical reason codes and facility inputs without crash", () => {
+    const html = renderToString(
+      React.createElement(EmergencyScanView, { initialPatientId: "p-test-uuid-999" })
+    );
+    expect(html).toBeTruthy();
+    expect(html).toContain("Break-Glass Emergency Access");
+    expect(html).toContain("Clinical Reason Code");
+    expect(html).toContain("Facility / Hospital");
+  });
+});
+````
+
+## File: frontend/src/config/i18n.js
+````javascript
+export const translations = {
+  en: {
+    title: "GoldenHour",
+    tagline: "Trusted Emergency Medical History",
+    emergencyAccess: "🚨 Emergency Access",
+    breakGlassTitle: "Emergency Break-Glass Protocol",
+    breakGlassWarning: "Statutory Notice: This access initiates an unconsented 15-minute emergency access window. All reads are immutably logged on-chain. Unauthorized access is punishable under Section 43 of the IT Act & Section 12 of the DPDP Act 2023.",
+    reasonCode: "Clinical Reason Code",
+    facility: "Medical Facility / Hospital Name",
+    justification: "Clinical Justification",
+    triggerAccess: "Unlock Critical Data (15 Min)",
+    bloodGroup: "Blood Group",
+    allergies: "Life-Threatening Allergies",
+    conditions: "Chronic Conditions",
+    emergencyContact: "Emergency Contact",
+    consentActive: "Active Consent",
+    grantConsent: "Grant Provider Consent",
+    revokeConsent: "Revoke Consent",
+    grievanceOfficer: "Statutory Data Protection & Grievance Officer",
+    viewIPS: "Download FHIR IPS Bundle",
+  },
+  ta: {
+    title: "கோல்டன்அவர் (GoldenHour)",
+    tagline: "நம்பகமான அவசர மருத்துவ வரலாறு",
+    emergencyAccess: "🚨 அவசர கால அணுகல்",
+    breakGlassTitle: "அவசரகால தரவு அணுகல் விதிமுறை",
+    breakGlassWarning: "சட்டப்பூர்வ அறிவிப்பு: இந்த அவசர கால அணுகல் 15 நிமிடங்களுக்கு மட்டுமே செல்லுபடியாகும். அனைத்து அணுகல்களும் பிளாக்செயினில் நிரந்தரமாக பதிவு செய்யப்படுகின்றன. அங்கீகரிக்கப்படாத அணுகல் சட்டப்படி தண்டனைக்குரியது.",
+    reasonCode: "மருத்துவ காரணக் குறியீடு",
+    facility: "மருத்துவமனை / சிகிச்சை மையம்",
+    justification: "மருத்துவ அவசரக் காரணம்",
+    triggerAccess: "முக்கிய தகவல்களை திறக்க (15 நிமிடங்கள்)",
+    bloodGroup: "இரத்த வகை",
+    allergies: "உயிருக்கு ஆபத்தான ஒவ்வாமைகள்",
+    conditions: "நீண்டகால நோய்கள்",
+    emergencyContact: "அவசர தொடர்பு எண்",
+    consentActive: "செயலில் உள்ள அனுமதி",
+    grantConsent: "மருத்துவருக்கு அனுமதி வழங்குக",
+    revokeConsent: "அனுமதியை ரத்து செய்க",
+    grievanceOfficer: "சட்டப்பூர்வ தரவு பாதுகாப்பு மற்றும் குறைதீர்ப்பு அதிகாரி",
+    viewIPS: "FHIR மருத்துவ சுருக்கத்தை பதிவிறக்கு",
+  },
+  hi: {
+    title: "गोल्डनऑवर (GoldenHour)",
+    tagline: "विश्वसनीय आपातकालीन चिकित्सा इतिहास",
+    emergencyAccess: "🚨 आपातकालीन एक्सेस",
+    breakGlassTitle: "आपातकालीन ब्रेक-ग्लास प्रोटोकॉल",
+    breakGlassWarning: "वैधानिक सूचना: यह केवल 15 मिनट की आपातकालीन खिड़की प्रदान करता है। हर दृश्य ब्लॉकचेन पर अपरिवर्तनीय रूप से दर्ज होता है। अनधिकृत पहुंच कानूनन दंडनीय है।",
+    reasonCode: "चिकित्सीय कारण कोड",
+    facility: "अस्पताल / आपातकालीन केंद्र का नाम",
+    justification: "चिकित्सीय औचित्य",
+    triggerAccess: "महत्वपूर्ण डेटा अनलॉक करें (15 मिनट)",
+    bloodGroup: "रक्त समूह",
+    allergies: "गंभीर एलर्जी",
+    conditions: "पुरानी बीमारियाँ",
+    emergencyContact: "आपातकालीन संपर्क",
+    consentActive: "सक्रिय सहमति",
+    grantConsent: "चिकित्सक को सहमति दें",
+    revokeConsent: "सहमति रद्द करें",
+    grievanceOfficer: "वैधानिक डेटा संरक्षण एवं शिकायत अधिकारी",
+    viewIPS: "FHIR मेडिकल समरी डाउनलोड करें",
+  },
+};
+export const REASON_CODES = [
+  { code: "UNCONSCIOUS_TRAUMA", label: "Unconscious Trauma / Road Accident" },
+  { code: "CARDIAC_ARREST", label: "Acute Cardiac Event / CPR" },
+  { code: "ANAPHYLAXIS", label: "Severe Acute Anaphylaxis / Airway Compromise" },
+  { code: "STATUS_EPILEPTICUS", label: "Status Epilepticus / Uncontrolled Seizures" },
+  { code: "ACUTE_RESPIRATORY_DISTRESS", label: "Acute Respiratory Distress" },
+  { code: "COMA_UNRESPONSIVE", label: "Unresponsive / Altered Mental Status" },
+];
+````
+
+## File: repomix.config.json
+````json
+{
+  "output": {
+    "filePath": "repomix-output.xml",
+    "style": "xml",
+    "removeComments": false,
+    "removeEmptyLines": true,
+    "topFilesLength": 10,
+    "showLineNumbers": false,
+    "copyToClipboard": false
+  },
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      "**/package-lock.json",
+      "**/.data/**",
+      "**/dist/**",
+      "**/artifacts/**",
+      "**/cache/**",
+      "repomix-output.*",
+      "**/.github/**",
+      "**/*.log",
+      "**/.env",
+      "**/.env.*"
+    ]
+  },
+  "security": {
+    "enableSecurityCheck": false
+  }
+}
+````
+
+## File: backend/migrations/001_initial.sql
+````sql
+create table if not exists patients(id uuid primary key,wallet text unique not null,profile jsonb not null,critical jsonb not null,created_at timestamptz not null);
+create table if not exists providers(id uuid primary key,wallet text unique not null,name text not null,license_number text not null,specialty text not null,status text not null check(status in('pending','verified','suspended')),verified_by text,verified_at timestamptz,updated_at timestamptz,created_at timestamptz not null);
+create table if not exists records(id uuid primary key,patient_id uuid not null references patients(id) on delete cascade,record_type text not null,doctor_id text not null,ipfs_cid text not null,encrypted_hash text not null,created_at timestamptz not null);
+create table if not exists audit_logs(id uuid primary key,patient_id uuid references patients(id) on delete cascade,actor text not null,action text not null,record_id uuid,provider_id uuid,metadata jsonb not null default '{}'::jsonb,expires_at timestamptz,created_at timestamptz not null);
+create index if not exists idx_records_patient on records(patient_id);create index if not exists idx_audit_patient on audit_logs(patient_id);
+````
+
+## File: backend/migrations/002_consents.sql
+````sql
+create table if not exists patient_provider_consents(
+ id uuid primary key,
+ patient_id uuid not null references patients(id) on delete cascade,
+ provider_id uuid not null references providers(id) on delete cascade,
+ status text not null check(status in('active','revoked')),
+ scope jsonb not null default '["records"]'::jsonb,
+ granted_at timestamptz not null,
+ revoked_at timestamptz,
+ unique(patient_id,provider_id)
+);
+create index if not exists idx_consent_patient_provider on patient_provider_consents(patient_id,provider_id,status);
+````
+
+## File: backend/test/postgres-migration.test.js
+````javascript
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { runMigrations } = require("../src/config/migrate");
+test("runMigrations handles empty/missing DATABASE_URL gracefully without crashing", async () => {
+  delete process.env.DATABASE_URL;
+  await assert.doesNotReject(async () => {
+    await runMigrations();
+  });
+});
+````
+
+## File: backend/test/postgres-store.test.js
+````javascript
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const {
+  normalizePatient,
+  normalizeProvider,
+  normalizeRecord,
+  normalizeAudit,
+  normalizeConsent,
+} = require("../src/config/db");
+test("PostgresStore normalizes raw PostgreSQL snake_case rows into camelCase objects", () => {
+  const patientRow = {
+    id: "p1",
+    wallet: "0x1234567890123456789012345678901234567890",
+    profile: '{"fullName":"John Doe"}',
+    critical: '{"bloodGroup":"O+"}',
+    created_at: "2026-01-01T00:00:00.000Z",
+  };
+  const patient = normalizePatient(patientRow);
+  assert.equal(patient.id, "p1");
+  assert.equal(patient.profile.fullName, "John Doe");
+  assert.equal(patient.critical.bloodGroup, "O+");
+  assert.equal(patient.createdAt, "2026-01-01T00:00:00.000Z");
+  const providerRow = {
+    id: "doc1",
+    wallet: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    name: "Dr. Smith",
+    license_number: "MD-99",
+    specialty: "Emergency",
+    status: "verified",
+    verified_by: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    verified_at: "2026-01-02T00:00:00.000Z",
+    created_at: "2026-01-01T00:00:00.000Z",
+  };
+  const provider = normalizeProvider(providerRow);
+  assert.equal(provider.licenseNumber, "MD-99");
+  assert.equal(provider.verifiedBy, "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+  assert.equal(provider.verifiedAt, "2026-01-02T00:00:00.000Z");
+  const recordRow = {
+    id: "r1",
+    patient_id: "p1",
+    record_type: "Bloodwork",
+    doctor_id: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    ipfs_cid: "QmTest123",
+    encrypted_hash: "abcd",
+    created_at: "2026-01-01T00:00:00.000Z",
+  };
+  const record = normalizeRecord(recordRow);
+  assert.equal(record.patientId, "p1");
+  assert.equal(record.recordType, "Bloodwork");
+  assert.equal(record.ipfsCid, "QmTest123");
+  assert.equal(record.encryptedHash, "abcd");
+  const auditRow = {
+    id: "a1",
+    patient_id: "p1",
+    actor: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    action: "EMERGENCY_BREAK_GLASS",
+    expires_at: "2026-01-01T00:15:00.000Z",
+    created_at: "2026-01-01T00:00:00.000Z",
+  };
+  const audit = normalizeAudit(auditRow);
+  assert.equal(audit.patientId, "p1");
+  assert.equal(audit.expiresAt, "2026-01-01T00:15:00.000Z");
+  const consentRow = {
+    id: "c1",
+    patient_id: "p1",
+    provider_id: "doc1",
+    status: "active",
+    scope: '["records"]',
+    granted_at: "2026-01-01T00:00:00.000Z",
+    provider_wallet: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    provider_name: "Dr. Smith",
+    provider_specialty: "Emergency",
+  };
+  const consent = normalizeConsent(consentRow);
+  assert.equal(consent.patientId, "p1");
+  assert.equal(consent.providerWallet, "0x70997970C51812dc3A010C7d01b50e0d17dc79C8");
+  assert.equal(consent.providerName, "Dr. Smith");
+});
+````
+
+## File: backend/test/services.test.js
+````javascript
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const encryption = require("../src/services/encryptionService");
+const ipfs = require("../src/services/ipfsService");
+const { canonicalJsonStringify } = require("../src/controllers/recordController");
+test("encryptionService encrypts and decrypts clinical JSON data accurately", () => {
+  process.env.ENCRYPTION_KEY = Buffer.alloc(32, 1).toString("base64");
+  const payload = { summary: "Patient bloodwork normal", allergies: ["Penicillin"] };
+  const encrypted = encryption.encryptJson(payload);
+  assert.ok(encrypted.ciphertext);
+  assert.ok(encrypted.iv);
+  assert.ok(encrypted.tag);
+  const decrypted = encryption.decryptJson(encrypted);
+  assert.deepEqual(decrypted, payload);
+});
+test("canonicalJsonStringify produces deterministic sorted JSON strings", () => {
+  const obj1 = { z: 1, a: 2, m: { y: "b", x: "a" } };
+  const obj2 = { a: 2, m: { x: "a", y: "b" }, z: 1 };
+  assert.equal(canonicalJsonStringify(obj1), canonicalJsonStringify(obj2));
+  assert.equal(
+    canonicalJsonStringify(obj1),
+    '{"a":2,"m":{"x":"a","y":"b"},"z":1}'
+  );
+});
+test("ipfsService fetchEncrypted rejects invalid CID formats", async () => {
+  await assert.rejects(
+    async () => ipfs.fetchEncrypted("../path/injection"),
+    /Invalid IPFS CID/
+  );
+});
+````
+
+## File: backend/check.js
+````javascript
+const { execSync } = require("child_process");
+const path = require("path");
+const files = [
+  "src/app.js",
+  "src/config/db.js",
+  "src/config/migrate.js",
+  "src/config/authConfig.js",
+  "src/config/contractConfig.js",
+  "src/controllers/patientController.js",
+  "src/controllers/doctorController.js",
+  "src/controllers/consentController.js",
+  "src/controllers/recordController.js",
+  "src/controllers/emergencyController.js",
+  "src/middleware/authMiddleware.js",
+  "src/middleware/roleCheck.js",
+  "src/routes/authRoutes.js",
+  "src/routes/consentRoutes.js",
+  "src/routes/doctorRoutes.js",
+  "src/routes/emergencyRoutes.js",
+  "src/routes/patientRoutes.js",
+  "src/routes/recordRoutes.js",
+  "src/services/chainService.js",
+  "src/services/ipfsService.js",
+  "src/services/encryptionService.js",
+  "src/routes/complianceRoutes.js",
+  "src/controllers/complianceController.js",
+  "src/services/notificationService.js",
+  "src/services/fhirService.js",
+  "src/services/auditChainService.js",
+  "src/services/envelopeEncryptionService.js"
+];
+for (const f of files) {
+  const filePath = path.resolve(__dirname, f);
+  execSync(`"${process.execPath}" --check "${filePath}"`, { stdio: "inherit" });
+}
+console.log("Syntax check passed across all backend files");
+````
+
+## File: contracts/interfaces/IMedicalRecord.sol
+````solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+interface IMedicalRecord {
+    function recordCount(uint256 patientId) external view returns (uint256);
+}
+````
+
+## File: docs/architecture.md
+````markdown
+# GoldenHour architecture
+
+```mermaid
+flowchart LR
+  P[Patient] --> F[React frontend]
+  D[Verified doctor] --> F
+  F --> B[Express API]
+  F --> W[Wallet / QR]
+  B --> C[Smart contracts]
+  B --> E[AES-256-GCM]
+  E --> I[IPFS or permissioned storage]
+  C --> A[Immutable audit log]
+```
+
+The emergency path exposes only critical fields and requires a justification. A production implementation must bind provider identities to verified organizations and must perform an independent smart-contract and privacy review before handling regulated data.
+````
+
+## File: frontend/src/components/ErrorBoundary.jsx
+````javascript
+import React from "react";
+export default class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error("React ErrorBoundary caught an exception:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="panel error-box" style={{ margin: "2rem auto", maxWidth: "600px", padding: "2rem" }}>
+          <h2>Something went wrong</h2>
+          <p className="muted">An unexpected UI render error occurred.</p>
+          <p className="error">{this.state.error?.message || "Render error"}</p>
+          <button
+            className="primary"
+            style={{ marginTop: "1rem" }}
+            onClick={() => {
+              this.setState({ hasError: false, error: null });
+              window.location.reload();
+            }}
+          >
+            Reload Application
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+````
+
+## File: frontend/src/config/demoAccounts.js
+````javascript
+export const DEMO_ACCOUNTS = {
+  admin: {
+    label: "Admin Account (0xeF4C...749c)",
+    wallet: "0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c",
+  },
+  doctor: {
+    label: "Provider Account (0xa299...95Ee)",
+    wallet: "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+  },
+  patient: {
+    label: "Patient Account (0xA9A6...4504)",
+    wallet: "0xA9A65f72a90f4D4021CB56CC70f21D84fD444504",
+  },
+};
+const DEMO_WALLET_SET = new Set(
+  Object.values(DEMO_ACCOUNTS).map((account) => account.wallet.toLowerCase())
+);
+export function isDemoWallet(wallet) {
+  return DEMO_WALLET_SET.has((wallet || "").toLowerCase());
+}
+````
+
+## File: frontend/src/pages/index.jsx
+````javascript
+export { default } from "../App.jsx";
+````
+
+## File: frontend/src/utils/session.js
+````javascript
+const SESSION_PREFIX = "goldenhour_";
+const DISCONNECTED_FLAG = "goldenhour_wallet_disconnected";
+function removePrefixedKeys(storage) {
+  if (!storage) return;
+  const keys = [];
+  for (let i = 0; i < storage.length; i += 1) {
+    const key = storage.key(i);
+    if (key && key.startsWith(SESSION_PREFIX)) keys.push(key);
+  }
+  keys.forEach((key) => storage.removeItem(key));
+}
+export function clearBrowserSession() {
+  removePrefixedKeys(window.localStorage);
+  removePrefixedKeys(window.sessionStorage);
+  window.localStorage.setItem(DISCONNECTED_FLAG, "true");
+}
+export async function disconnectWalletProvider() {
+  if (!window.ethereum?.request) return;
+  try {
+    await window.ethereum.request({
+      method: "wallet_revokePermissions",
+      params: [{ eth_accounts: {} }],
+    });
+  } catch {
+    // Some wallets do not support revoke; local session is still cleared.
+  }
+}
+export async function fullLogoutCleanup() {
+  clearBrowserSession();
+  await disconnectWalletProvider();
+}
+export function isWalletDisconnected() {
+  return window.localStorage.getItem(DISCONNECTED_FLAG) === "true";
+}
+export function markWalletConnected() {
+  window.localStorage.removeItem(DISCONNECTED_FLAG);
+}
+````
+
+## File: frontend/src/utils/session.test.js
+````javascript
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearBrowserSession, fullLogoutCleanup, isWalletDisconnected, markWalletConnected } from "./session";
+function memoryStorage() {
+  const data = new Map();
+  return {
+    get length() {
+      return data.size;
+    },
+    key(index) {
+      return [...data.keys()][index] ?? null;
+    },
+    getItem(key) {
+      return data.has(key) ? data.get(key) : null;
+    },
+    setItem(key, value) {
+      data.set(String(key), String(value));
+    },
+    removeItem(key) {
+      data.delete(key);
+    },
+    clear() {
+      data.clear();
+    },
+  };
+}
+describe("session cleanup", () => {
+  beforeEach(() => {
+    const local = memoryStorage();
+    const session = memoryStorage();
+    vi.stubGlobal("localStorage", local);
+    vi.stubGlobal("sessionStorage", session);
+    vi.stubGlobal("window", {
+      localStorage: local,
+      sessionStorage: session,
+    });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+  it("removes GoldenHour keys and blocks auto-reconnect", () => {
+    localStorage.setItem("goldenhour_token", "tok");
+    localStorage.setItem("goldenhour_user", "{\"wallet\":\"0x1\"}");
+    sessionStorage.setItem("goldenhour_tmp", "1");
+    localStorage.setItem("unrelated", "keep");
+    clearBrowserSession();
+    expect(localStorage.getItem("goldenhour_token")).toBeNull();
+    expect(localStorage.getItem("goldenhour_user")).toBeNull();
+    expect(sessionStorage.getItem("goldenhour_tmp")).toBeNull();
+    expect(localStorage.getItem("unrelated")).toBe("keep");
+    expect(isWalletDisconnected()).toBe(true);
+  });
+  it("revokes wallet permissions when logging out fully", async () => {
+    const request = vi.fn().mockResolvedValue(undefined);
+    window.ethereum = { request };
+    localStorage.setItem("goldenhour_token", "tok");
+    await fullLogoutCleanup();
+    expect(localStorage.getItem("goldenhour_token")).toBeNull();
+    expect(isWalletDisconnected()).toBe(true);
+    expect(request).toHaveBeenCalledWith({
+      method: "wallet_revokePermissions",
+      params: [{ eth_accounts: {} }],
+    });
+  });
+  it("clears the disconnected flag on a new connection", () => {
+    clearBrowserSession();
+    markWalletConnected();
+    expect(isWalletDisconnected()).toBe(false);
+  });
+});
+````
+
+## File: frontend/src/utils/web3.test.js
+````javascript
+import { describe, expect, it } from "vitest"; import { isWalletAddress, shortenAddress } from "./web3";
+describe("wallet helpers", () => { it("shortens addresses safely", () => expect(shortenAddress("0x1234567890123456789012345678901234567890")).toBe("0x1234…7890")); it("validates an EVM address", () => expect(isWalletAddress("0x1234567890123456789012345678901234567890")).toBe(true)); });
+````
+
+## File: frontend/.env.example
+````
+VITE_API_URL=http://localhost:4000
+VITE_REGISTRY_ADDRESS=
+VITE_ACCESS_CONTROL_ADDRESS=
+VITE_RECORDS_ADDRESS=
+VITE_AUDIT_ADDRESS=
+VITE_EMERGENCY_ADDRESS=
+````
+
+## File: frontend/index.html
+````html
+<!doctype html><html><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>GoldenHour</title></head><body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body></html>
+````
+
+## File: frontend/vite.config.js
+````javascript
+import { defineConfig } from "vite"; import react from "@vitejs/plugin-react";
+export default defineConfig({ plugins: [react()], server: { port: 5173 } });
+````
+
+## File: scripts/grantAccess.js
+````javascript
+const hre = require("hardhat");
+async function main() {
+  const [patient] = await hre.ethers.getSigners();
+  const patientId = process.env.PATIENT_ID || "1";
+  const provider = process.env.PROVIDER_ADDRESS;
+  if (!provider) throw new Error("Set PROVIDER_ADDRESS before granting access");
+  const access = await hre.ethers.getContractAt("contracts/AccessControl.sol:AccessControl", process.env.ACCESS_CONTROL_ADDRESS);
+  const expiry = process.env.ACCESS_EXPIRY || "0";
+  await (await access.connect(patient).grantAccess(patientId, provider, expiry)).wait();
+  console.log(`Access granted for patient ${patientId} to ${provider}`);
+}
+main().catch((error) => { console.error(error); process.exitCode = 1; });
+````
+
+## File: scripts/seedTestData.js
+````javascript
+const hre = require("hardhat");
+async function main() {
+  const [owner] = await hre.ethers.getSigners();
+  const registry = await hre.ethers.getContractAt("PatientRegistry", process.env.REGISTRY_ADDRESS);
+  const access = await hre.ethers.getContractAt("contracts/AccessControl.sol:AccessControl", process.env.ACCESS_CONTROL_ADDRESS);
+  const records = await hre.ethers.getContractAt("MedicalRecord", process.env.RECORDS_ADDRESS);
+  await (await registry.registerPatient(hre.ethers.id("demo-profile"), hre.ethers.id("demo-critical"))).wait();
+  await (await access.setProviderVerified(owner.address, true)).wait();
+  await (await access.grantAccess(1, owner.address, 0)).wait();
+  await (await records.addRecord(1, "allergy", "ipfs://demo", hre.ethers.id("encrypted-demo"))).wait();
+  console.log("Seed data created for patient 1");
+}
+main().catch((error) => { console.error(error); process.exitCode = 1; });
+````
+
+## File: .gitignore
+````
+node_modules/
+.env
+.env.*
+!.env.example
+artifacts/
+cache/
+typechain-types/
+dist/
+coverage/
+*.log
+
+.repomix-output.md
+````
+
+## File: hardhat.config.js
+````javascript
+require("@nomicfoundation/hardhat-toolbox");
+require("dotenv").config();
+module.exports = {
+  solidity: { version: "0.8.24", settings: { optimizer: { enabled: true, runs: 200 } } },
+  networks: {
+    hardhat: {},
+    localhost: { url: "http://127.0.0.1:8545" },
+    sepolia: {
+      url: process.env.SEPOLIA_RPC_URL || "",
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : []
+    }
+  }
+};
+````
+
+## File: backend/src/config/authConfig.js
+````javascript
+const { canonicalizeWallet } = require("./db");
+function getJwtSecret() {
+  const value = process.env.JWT_SECRET;
+  const invalidPlaceholders = [
+    "local-development-secret",
+    "replace-with-a-long-random-secret",
+    "your-secret-key-here",
+  ];
+  if (!value || invalidPlaceholders.includes(value)) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("A strong, non-placeholder JWT_SECRET must be configured in production");
+    }
+    return value || "local-development-secret-fallback-dev-only";
+  }
+  return value;
+}
+const DEFAULT_DEMO_ADMINS = [
+  "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c",
+];
+function getAdminWallets() {
+  const raw = (process.env.ADMIN_WALLETS || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (raw.length === 0 && process.env.NODE_ENV !== "production") {
+    return DEFAULT_DEMO_ADMINS.map(canonicalizeWallet);
+  }
+  return raw.map(canonicalizeWallet);
+}
+function isCurrentAdmin(wallet) {
+  if (!wallet) return false;
+  const admins = getAdminWallets();
+  return admins.includes(canonicalizeWallet(wallet));
+}
+module.exports = {
+  getJwtSecret,
+  getAdminWallets,
+  isCurrentAdmin,
+};
+````
+
+## File: backend/src/config/contractConfig.js
+````javascript
+module.exports = {
+  rpcUrl: process.env.RPC_URL || "http://127.0.0.1:8545",
+  backendPrivateKey: process.env.BACKEND_PRIVATE_KEY || "",
+  registryAddress: process.env.REGISTRY_ADDRESS || "",
+  accessControlAddress: process.env.ACCESS_CONTROL_ADDRESS || "",
+  recordsAddress: process.env.RECORDS_ADDRESS || "",
+  auditAddress: process.env.AUDIT_ADDRESS || "",
+  emergencyAddress: process.env.EMERGENCY_ADDRESS || ""
+};
+````
+
+## File: backend/src/routes/consentRoutes.js
+````javascript
+const express = require("express");
+const { requireAuth } = require("../middleware/authMiddleware");
+module.exports = (c) => {
+  const r = express.Router();
+  r.get("/provider", requireAuth, c.listForProvider);
+  r.get("/:patientId", requireAuth, c.list);
+  r.post("/:patientId", requireAuth, c.grant);
+  r.post("/:patientId/revoke", requireAuth, c.revoke);
+  return r;
+};
+````
+
+## File: backend/README.md
+````markdown
+# GoldenHour Backend
+
+## Security baseline
+- Wallet nonce/signature authentication.
+- Patient ownership checks.
+- Provider lifecycle: pending -> verified.
+- Audited registration, verification, record and emergency events.
+- AES-256-GCM requires a real 32-byte base64 key.
+- IPFS persistence refuses fake CIDs.
+
+## Current persistence
+The store is intentionally an interface-compatible local implementation. Replace it with PostgreSQL before handling real patient data; JSON files do not provide production concurrency, backup, transaction, retention or HA guarantees.
+
+## Provider governance
+Admin verification is a technical workflow only. Real deployments must integrate institutional identity proofing and license verification.
+````
+
+## File: contracts/AccessControl.sol
+````solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+import {AccessControl as OZAccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+interface IPatientRegistryOwner { function ownerOfPatient(uint256 patientId) external view returns (address); }
+/// @title AccessControl
+/// @notice Patient-controlled, time-bound permissions for verified providers.
+contract AccessControl is OZAccessControl {
+    bytes32 public constant VERIFIER_ROLE = keccak256("VERIFIER_ROLE");
+    mapping(uint256 => mapping(address => uint256)) private _expiry;
+    mapping(address => bool) public verifiedProvider;
+    IPatientRegistryOwner public immutable patientRegistry;
+    event ProviderVerified(address indexed provider, bool verified);
+    event AccessGranted(uint256 indexed patientId, address indexed provider, uint256 expiry);
+    event AccessRevoked(uint256 indexed patientId, address indexed provider);
+    constructor(address admin, address registryAddress) { _grantRole(DEFAULT_ADMIN_ROLE, admin); patientRegistry = IPatientRegistryOwner(registryAddress); }
+    function setProviderVerified(address provider, bool verified) external onlyRole(VERIFIER_ROLE) { verifiedProvider[provider] = verified; emit ProviderVerified(provider, verified); }
+    function grantAccess(uint256 patientId, address provider, uint256 expiry) external {
+        require(patientRegistry.ownerOfPatient(patientId) == msg.sender, "Not patient owner");
+        _grant(patientId, provider, expiry);
+    }
+    function grantAccessFor(address patient, uint256 patientId, address provider, uint256 expiry) external onlyRole(VERIFIER_ROLE) {
+        require(patientRegistry.ownerOfPatient(patientId) == patient, "Patient owner mismatch");
+        _grant(patientId, provider, expiry);
+    }
+    function _grant(uint256 patientId, address provider, uint256 expiry) internal {
+        require(verifiedProvider[provider], "Provider not verified");
+        require(expiry == 0 || expiry > block.timestamp, "Invalid expiry");
+        _expiry[patientId][provider] = expiry == 0 ? type(uint256).max : expiry;
+        emit AccessGranted(patientId, provider, _expiry[patientId][provider]);
+    }
+    function revokeAccess(uint256 patientId, address provider) external {
+        require(patientRegistry.ownerOfPatient(patientId) == msg.sender, "Not patient owner");
+        _expiry[patientId][provider] = 0; emit AccessRevoked(patientId, provider);
+    }
+    function revokeAccessFor(address patient, uint256 patientId, address provider) external onlyRole(VERIFIER_ROLE) {
+        require(patientRegistry.ownerOfPatient(patientId) == patient, "Patient owner mismatch");
+        _expiry[patientId][provider] = 0; emit AccessRevoked(patientId, provider);
+    }
+    function checkAccess(uint256 patientId, address provider) public view returns (bool) { return _expiry[patientId][provider] >= block.timestamp && _expiry[patientId][provider] != 0; }
+    function accessExpiry(uint256 patientId, address provider) external view returns (uint256) { return _expiry[patientId][provider]; }
+}
+````
+
+## File: contracts/AuditLog.sol
+````solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+/// @title AuditLog
+/// @notice Immutable append-only audit trail for access events.
+contract AuditLog is Ownable {
+    struct Entry { uint256 patientId; address accessor; string reason; string scope; uint64 timestamp; }
+    mapping(uint256 => Entry[]) private _entries;
+    mapping(address => bool) public authorizedWriters;
+    event AccessLogged(uint256 indexed patientId, address indexed accessor, string scope, string reason);
+    event WriterAuthorized(address indexed writer, bool authorized);
+    constructor(address initialOwner) Ownable(initialOwner) {
+        authorizedWriters[initialOwner] = true;
+    }
+    modifier onlyAuthorized() {
+        require(owner() == msg.sender || authorizedWriters[msg.sender], "AuditLog: Caller not authorized");
+        _;
+    }
+    function setAuthorizedWriter(address writer, bool authorized) external onlyOwner {
+        authorizedWriters[writer] = authorized;
+        emit WriterAuthorized(writer, authorized);
+    }
+    function logAccess(uint256 patientId, address accessor, string calldata reason, string calldata scope) external onlyAuthorized {
+        _entries[patientId].push(Entry(patientId, accessor, reason, scope, uint64(block.timestamp)));
+        emit AccessLogged(patientId, accessor, scope, reason);
+    }
+    function getAuditTrail(uint256 patientId) external view returns (Entry[] memory) { return _entries[patientId]; }
+    function entryCount(uint256 patientId) external view returns (uint256) { return _entries[patientId].length; }
+}
+````
+
+## File: frontend/src/utils/web3.js
+````javascript
+export function shortenAddress(address = "") { return address ? `${address.slice(0, 6)}…${address.slice(-4)}` : ""; }
+export function isWalletAddress(value = "") { return /^0x[a-fA-F0-9]{40}$/.test(value); }
+````
+
+## File: frontend/src/main.jsx
+````javascript
+import React from "react"; import { createRoot } from "react-dom/client"; import { BrowserRouter } from "react-router-dom"; import App from "./App"; import "./styles.css"; createRoot(document.getElementById("root")).render(<BrowserRouter><App/></BrowserRouter>);
+````
+
+## File: frontend/Dockerfile
+````dockerfile
+FROM node:20-alpine
+WORKDIR /app
+
+# Vite inlines VITE_* vars at build time, so they must be passed as build ARGs
+# and re-exported as ENV before `npm run build` runs.
+ARG VITE_API_URL=http://localhost:4000
+ARG VITE_REGISTRY_ADDRESS=
+ARG VITE_ACCESS_CONTROL_ADDRESS=
+ARG VITE_RECORDS_ADDRESS=
+ARG VITE_AUDIT_ADDRESS=
+ARG VITE_EMERGENCY_ADDRESS=
+ENV VITE_API_URL=$VITE_API_URL \
+    VITE_REGISTRY_ADDRESS=$VITE_REGISTRY_ADDRESS \
+    VITE_ACCESS_CONTROL_ADDRESS=$VITE_ACCESS_CONTROL_ADDRESS \
+    VITE_RECORDS_ADDRESS=$VITE_RECORDS_ADDRESS \
+    VITE_AUDIT_ADDRESS=$VITE_AUDIT_ADDRESS \
+    VITE_EMERGENCY_ADDRESS=$VITE_EMERGENCY_ADDRESS
+
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+RUN npm install -g serve
+EXPOSE 3000
+CMD ["serve", "-s", "dist", "-l", "3000"]
+````
+
+## File: scripts/deploy.js
+````javascript
+const hre = require("hardhat");
+async function main() {
+  const [deployer] = await hre.ethers.getSigners();
+  const Registry = await hre.ethers.getContractFactory("PatientRegistry");
+  const registry = await Registry.deploy(deployer.address); await registry.waitForDeployment();
+  const Access = await hre.ethers.getContractFactory("contracts/AccessControl.sol:AccessControl");
+  const access = await Access.deploy(deployer.address, await registry.getAddress()); await access.waitForDeployment();
+  const Records = await hre.ethers.getContractFactory("MedicalRecord");
+  const records = await Records.deploy(await access.getAddress(), deployer.address); await records.waitForDeployment();
+  const Audit = await hre.ethers.getContractFactory("AuditLog");
+  const audit = await Audit.deploy(deployer.address); await audit.waitForDeployment();
+  const Emergency = await hre.ethers.getContractFactory("EmergencyAccess");
+  const emergency = await Emergency.deploy(await registry.getAddress(), await access.getAddress(), await audit.getAddress(), deployer.address); await emergency.waitForDeployment();
+  await access.grantRole(await access.VERIFIER_ROLE(), deployer.address);
+  await audit.transferOwnership(await emergency.getAddress());
+  console.log(JSON.stringify({ registry: await registry.getAddress(), access: await access.getAddress(), records: await records.getAddress(), audit: await audit.getAddress(), emergency: await emergency.getAddress(), relayer: deployer.address }, null, 2));
+}
+main().catch((error) => { console.error(error); process.exitCode = 1; });
+````
+
+## File: scripts/wireLocalDeployment.js
+````javascript
+/**
+ * scripts/wireLocalDeployment.js
+ *
+ * Deploys the GoldenHour contracts to whatever network Hardhat is pointed at
+ * (defaults to "localhost"), then writes the resulting contract addresses
+ * into backend/.env and frontend/.env.local so the backend relay and the
+ * frontend dapp both pick them up automatically.
+ *
+ * Usage (from repo root, with `npx hardhat node` already running in another
+ * terminal):
+ *
+ *   node scripts/wireLocalDeployment.js
+ *
+ * This removes the manual "copy-paste the deploy JSON into three .env files"
+ * step that previously blocked a smooth demo.
+ */
+const fs = require("fs");
+const path = require("path");
+const hre = require("hardhat");
+const ROOT = path.join(__dirname, "..");
+const BACKEND_ENV = path.join(ROOT, "backend", ".env");
+const BACKEND_ENV_EXAMPLE = path.join(ROOT, "backend", ".env.example");
+const FRONTEND_ENV = path.join(ROOT, "frontend", ".env.local");
+const FRONTEND_ENV_EXAMPLE = path.join(ROOT, "frontend", ".env.example");
+function upsertEnvFile(filePath, fallbackTemplate, updates) {
+  let contents = "";
+  if (fs.existsSync(filePath)) {
+    contents = fs.readFileSync(filePath, "utf8");
+  } else if (fs.existsSync(fallbackTemplate)) {
+    contents = fs.readFileSync(fallbackTemplate, "utf8");
+  }
+  const lines = contents.split("\n").filter((l) => l.length > 0 || true);
+  const seen = new Set();
+  const nextLines = lines.map((line) => {
+    const match = line.match(/^([A-Z0-9_]+)=/);
+    if (match && Object.prototype.hasOwnProperty.call(updates, match[1])) {
+      seen.add(match[1]);
+      return `${match[1]}=${updates[match[1]]}`;
+    }
+    return line;
+  });
+  for (const [key, value] of Object.entries(updates)) {
+    if (!seen.has(key)) {
+      nextLines.push(`${key}=${value}`);
+    }
+  }
+  fs.writeFileSync(filePath, nextLines.join("\n").replace(/\n{3,}/g, "\n\n"));
+  console.log(`Updated ${path.relative(ROOT, filePath)}`);
+}
+async function main() {
+  const [deployer] = await hre.ethers.getSigners();
+  console.log(`Deploying from ${deployer.address} on network "${hre.network.name}"...`);
+  const Registry = await hre.ethers.getContractFactory("PatientRegistry");
+  const registry = await Registry.deploy(deployer.address);
+  await registry.waitForDeployment();
+  const Access = await hre.ethers.getContractFactory("contracts/AccessControl.sol:AccessControl");
+  const access = await Access.deploy(deployer.address, await registry.getAddress());
+  await access.waitForDeployment();
+  const Records = await hre.ethers.getContractFactory("MedicalRecord");
+  const records = await Records.deploy(await access.getAddress(), deployer.address);
+  await records.waitForDeployment();
+  const Audit = await hre.ethers.getContractFactory("AuditLog");
+  const audit = await Audit.deploy(deployer.address);
+  await audit.waitForDeployment();
+  const Emergency = await hre.ethers.getContractFactory("EmergencyAccess");
+  const emergency = await Emergency.deploy(
+    await registry.getAddress(),
+    await access.getAddress(),
+    await audit.getAddress(),
+    deployer.address
+  );
+  await emergency.waitForDeployment();
+  await (await access.grantRole(await access.VERIFIER_ROLE(), deployer.address)).wait();
+  await (await audit.transferOwnership(await emergency.getAddress())).wait();
+  const addresses = {
+    REGISTRY_ADDRESS: await registry.getAddress(),
+    ACCESS_CONTROL_ADDRESS: await access.getAddress(),
+    RECORDS_ADDRESS: await records.getAddress(),
+    AUDIT_ADDRESS: await audit.getAddress(),
+    EMERGENCY_ADDRESS: await emergency.getAddress(),
+  };
+  console.log("\nDeployed contract addresses:");
+  console.log(JSON.stringify(addresses, null, 2));
+  // Backend needs the RPC + relayer key too, so the ChainService actually enables itself.
+  upsertEnvFile(BACKEND_ENV, BACKEND_ENV_EXAMPLE, {
+    ...addresses,
+    RPC_URL: "http://127.0.0.1:8545",
+    BACKEND_PRIVATE_KEY: deployer.privateKey || process.env.BACKEND_PRIVATE_KEY || "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+  });
+  // Frontend only needs the VITE_-prefixed addresses.
+  upsertEnvFile(FRONTEND_ENV, FRONTEND_ENV_EXAMPLE, {
+    VITE_REGISTRY_ADDRESS: addresses.REGISTRY_ADDRESS,
+    VITE_ACCESS_CONTROL_ADDRESS: addresses.ACCESS_CONTROL_ADDRESS,
+    VITE_RECORDS_ADDRESS: addresses.RECORDS_ADDRESS,
+    VITE_AUDIT_ADDRESS: addresses.AUDIT_ADDRESS,
+    VITE_EMERGENCY_ADDRESS: addresses.EMERGENCY_ADDRESS,
+  });
+  console.log(
+    "\nDone. Restart the backend (npm run backend) and frontend dev server so they pick up the new .env values."
+  );
+  if (!deployer.privateKey) {
+    console.log(
+      "\nNOTE: could not auto-detect the deployer's private key from the Hardhat signer object. " +
+        "If BACKEND_PRIVATE_KEY in backend/.env is still blank, copy one of the funded private keys " +
+        "printed by `npx hardhat node` into that field manually so the backend relay can sign transactions."
+    );
+  }
+}
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+````
+
+## File: seed.js
+````javascript
+const { ethers } = require("ethers");
+const API = "http://localhost:4000";
+const DEMO_WALLETS = {
+  admin: "0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c",
+  doctor: "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+  patient: "0xA9A65f72a90f4D4021CB56CC70f21D84fD444504",
+};
+async function login(wallet) {
+  const nRes = await fetch(`${API}/api/auth/nonce/${wallet}`);
+  if (!nRes.ok) throw new Error("Nonce request failed: " + (await nRes.text()));
+  await nRes.json();
+  const vRes = await fetch(`${API}/api/auth/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ wallet, signature: `DEMO_SIGNATURE_${wallet}` }),
+  });
+  const data = await vRes.json();
+  if (!vRes.ok) throw new Error("Login failed: " + JSON.stringify(data));
+  return data.token;
+}
+async function seed() {
+  console.log("=== GoldenHour Live Demo Data Seeder ===");
+  // 1. Authenticate tokens
+  const adminToken = await login(DEMO_WALLETS.admin);
+  const docToken = await login(DEMO_WALLETS.doctor);
+  const patToken = await login(DEMO_WALLETS.patient);
+  console.log("✅ Authenticated 3 roles: Admin, Provider, Patient");
+  const regPat = await fetch(`${API}/api/patients`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${patToken}` },
+    body: JSON.stringify({
+      profile: { fullName: "John Doe", age: 34, gender: "Male", phone: "+1-555-0199" },
+      critical: { bloodGroup: "O+", allergies: ["Penicillin", "Peanuts"], conditions: ["Asthma"], emergencyContact: "+1-555-0122" },
+    }),
+  });
+  let patData = await regPat.json();
+  let patientId = patData.id;
+  if (!patientId) {
+    const meRes = await fetch(`${API}/api/patients/me`, {
+      headers: { Authorization: `Bearer ${patToken}` },
+    });
+    const meData = await meRes.json();
+    patientId = meData.patientId;
+  }
+  console.log("✅ Patient ID:", patientId);
+  // 3. Register Doctor & Admin Verify Doctor
+  const regDoc = await fetch(`${API}/api/doctors/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({
+      name: "Dr. Marcus Vance, MD",
+      licenseNumber: "MD-98421-CA",
+      specialty: "Trauma & Emergency Care",
+    }),
+  });
+  console.log("✅ Provider Registered (Status: 201/200):", regDoc.status);
+  const verifyDoc = await fetch(`${API}/api/doctors/${DEMO_WALLETS.doctor}/status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ status: "verified" }),
+  });
+  console.log("✅ Provider Status Updated to Verified by Admin:", (await verifyDoc.json()).status);
+  // 4. Grant Consent from Patient to Doctor
+  const grantRes = await fetch(`${API}/api/consents/${patientId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${patToken}` },
+    body: JSON.stringify({ wallet: DEMO_WALLETS.doctor }),
+  });
+  console.log("✅ Consent Granted from Patient to Provider:", grantRes.status);
+  // 5. Doctor Adds Medical Records for Patient
+  const r1 = await fetch(`${API}/api/records`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({
+      patientId,
+      recordType: "Consultation",
+      clinicalData: {
+        title: "Annual Cardiology & Vital Assessment",
+        bp: "120/80",
+        heartRate: 72,
+        diagnosis: "Patient exhibits normal sinus rhythm. Cardiovascular health within optimal parameters.",
+        recommendations: "Maintain current exercise regime and balanced diet.",
+      },
+    }),
+  });
+  console.log("✅ Clinical Record 1 (Consultation) Created & Encrypted:", (await r1.json()).id);
+  const r2 = await fetch(`${API}/api/records`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({
+      patientId,
+      recordType: "Lab Results",
+      clinicalData: {
+        title: "Complete Blood Count & Lipid Panel",
+        cholesterol: "185 mg/dL",
+        hdl: "58 mg/dL",
+        ldl: "110 mg/dL",
+        triglycerides: "120 mg/dL",
+        status: "All lab parameters normal",
+      },
+    }),
+  });
+  console.log("✅ Clinical Record 2 (Lab Results) Created & Encrypted:", (await r2.json()).id);
+  // 6. Doctor Triggers Emergency Access (Break-Glass)
+  const emgRes = await fetch(`${API}/api/emergency-access`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${docToken}` },
+    body: JSON.stringify({
+      patientId,
+      justification: "Severe acute respiratory distress following vehicle collision. Instant critical allergy retrieval required.",
+    }),
+  });
+  const emgData = await emgRes.json();
+  console.log("✅ Emergency Break-Glass Triggered:", emgData.accessId);
+  // 7. Doctor Views Critical Payload
+  const critRes = await fetch(`${API}/api/emergency-access/critical/${emgData.accessId}`, {
+    headers: { Authorization: `Bearer ${docToken}` },
+  });
+  const critPayload = await critRes.json();
+  console.log("✅ Critical Emergency Payload Accessed:", critPayload.critical);
+  // 8. Admin Verification Audit Log Fetch
+  const auditsRes = await fetch(`${API}/api/emergency-access/recent/all`, {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  const audits = await auditsRes.json();
+  console.log(`✅ Global Emergency Access Audit Log Count: ${audits.length} events logged`);
+  console.log("========================================");
+}
+seed().catch((err) => console.error("Seeding error:", err));
+````
+
+## File: backend/src/middleware/authMiddleware.js
+````javascript
+const jwt = require("jsonwebtoken");
+const { getJwtSecret, isCurrentAdmin } = require("../config/authConfig");
+const { canonicalizeWallet } = require("../config/db");
+function requireAuth(req, res, next) {
+  const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  if (!token) return res.status(401).json({ error: "Authentication token required" });
+  try {
+    const secret = getJwtSecret();
+    const payload = jwt.verify(token, secret, { algorithms: ["HS256"], issuer: "goldenhour" });
+    // Canonicalize wallet in user context
+    const userWallet = canonicalizeWallet(payload.wallet);
+    // Live re-check for admin role (Bug #11)
+    let userRole = payload.role;
+    if (userRole === "admin" && !isCurrentAdmin(userWallet)) {
+      userRole = "patient";
+    }
+    req.user = { ...payload, wallet: userWallet, role: userRole };
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: "Invalid or expired authentication token" });
+  }
+}
+module.exports = { requireAuth };
+````
+
+## File: backend/src/middleware/roleCheck.js
+````javascript
+function requireRole(...roles){return(req,res,next)=>{if(!req.user||!roles.includes(req.user.role))return res.status(403).json({error:"Insufficient role"});next()}}function requireVerifiedProvider(store){return async(req,res,next)=>{try{const p=await store.providerByWallet(req.user.wallet);if(!p||p.status!=="verified")return res.status(403).json({error:"Verified provider access required"});req.provider=p;next()}catch(e){next(e)}}}module.exports={requireRole,requireVerifiedProvider};
+````
+
+## File: backend/src/services/encryptionService.js
+````javascript
+const crypto = require("crypto");
+function devFallbackKey() {
+  return crypto.createHash("sha256").update("goldenhour-local-dev-only-fallback-key").digest("base64");
+}
+function key() {
+  let raw = process.env.ENCRYPTION_KEY;
+  if (!raw) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("ENCRYPTION_KEY must be configured in production");
+    }
+    raw = devFallbackKey();
+  }
+  const k = Buffer.from(raw, "base64");
+  if (k.length !== 32) throw new Error("ENCRYPTION_KEY must be a base64-encoded 32-byte key");
+  return k;
+}
+function encryptJson(value) {
+  const iv = crypto.randomBytes(12), cipher = crypto.createCipheriv("aes-256-gcm", key(), iv);
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()]);
+  return { version: 1, algorithm: "aes-256-gcm", iv: iv.toString("base64"), tag: cipher.getAuthTag().toString("base64"), ciphertext: ciphertext.toString("base64") };
+}
+function decryptJson(p) {
+  if (!p || p.version !== 1 || p.algorithm !== "aes-256-gcm") throw new Error("Unsupported encrypted payload");
+  const d = crypto.createDecipheriv("aes-256-gcm", key(), Buffer.from(p.iv, "base64"));
+  d.setAuthTag(Buffer.from(p.tag, "base64"));
+  return JSON.parse(Buffer.concat([d.update(Buffer.from(p.ciphertext, "base64")), d.final()]).toString("utf8"));
+}
+module.exports = { encryptJson, decryptJson };
+````
+
+## File: backend/test/smoke.test.js
+````javascript
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const request = require("supertest");
+const os = require("os");
+const path = require("path");
+const { createApp } = require("../src/app");
+const { JsonStore } = require("../src/config/db");
+test("Express application initializes cleanly and responds to health checks", async () => {
+  const store = new JsonStore(path.join(os.tmpdir(), `goldenhour-smoke-${Date.now()}.json`));
+  const app = await createApp({ store });
+  assert.ok(app);
+  const res = await request(app).get("/health");
+  assert.equal(res.status, 200);
+  assert.equal(res.body.status, "ok");
+});
+````
+
+## File: backend/Dockerfile
+````dockerfile
+FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY src ./src
+COPY migrations ./migrations
+USER node
+EXPOSE 4000
+CMD ["node", "src/app.js"]
+````
+
+## File: contracts/EmergencyAccess.sol
+````solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+interface IRegistry { function ownerOfPatient(uint256 patientId) external view returns (address); }
+interface IProviderAccess { function verifiedProvider(address provider) external view returns (bool); }
+interface IAudit { function logAccess(uint256 patientId, address accessor, string calldata reason, string calldata scope) external; }
+/// @title EmergencyAccess
+/// @notice Break-glass access is restricted to verified providers and logged on-chain.
+contract EmergencyAccess is Ownable {
+    IRegistry public immutable registry;
+    IProviderAccess public immutable accessControl;
+    IAudit public immutable auditLog;
+    event EmergencyTriggered(uint256 indexed patientId, address indexed doctor, bytes32 indexed justificationHash);
+    constructor(address registryAddress, address accessAddress, address auditAddress, address initialOwner) Ownable(initialOwner) {
+        registry = IRegistry(registryAddress);
+        accessControl = IProviderAccess(accessAddress);
+        auditLog = IAudit(auditAddress);
+    }
+    function triggerEmergencyAccess(uint256 patientId, string calldata justification) external {
+        _trigger(patientId, msg.sender, justification);
+    }
+    function triggerEmergencyAccessFor(uint256 patientId, address doctor, string calldata justification) external onlyOwner {
+        _trigger(patientId, doctor, justification);
+    }
+    function _trigger(uint256 patientId, address doctor, string calldata justification) internal {
+        require(accessControl.verifiedProvider(doctor), "Provider not verified");
+        require(bytes(justification).length >= 10, "Justification required");
+        require(registry.ownerOfPatient(patientId) != address(0), "Patient not found");
+        bytes32 justificationHash = keccak256(bytes(justification));
+        auditLog.logAccess(patientId, doctor, "EMERGENCY_BREAK_GLASS_HASHED", "EMERGENCY_CRITICAL_ONLY");
+        emit EmergencyTriggered(patientId, doctor, justificationHash);
+    }
+}
+````
+
+## File: contracts/MedicalRecord.sol
+````solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IMedicalRecord} from "./interfaces/IMedicalRecord.sol";
+interface IGoldenHourAccess {
+    function checkAccess(uint256 patientId, address provider) external view returns (bool);
+}
+/// @title MedicalRecord
+/// @notice Append-only record hashes; encrypted clinical data remains off-chain.
+contract MedicalRecord is Ownable, IMedicalRecord {
+    struct Record {
+        uint256 version;
+        string recordType;
+        string ipfsHash;
+        bytes32 encryptedHash;
+        address doctor;
+        uint64 createdAt;
+    }
+    IGoldenHourAccess public immutable accessControl;
+    mapping(uint256 => Record[]) private _records;
+    event RecordAdded(
+        uint256 indexed patientId,
+        uint256 indexed version,
+        string recordType,
+        address indexed doctor
+    );
+    constructor(address accessControlAddress, address initialOwner) Ownable(initialOwner) {
+        accessControl = IGoldenHourAccess(accessControlAddress);
+    }
+    function addRecord(
+        uint256 patientId,
+        string calldata recordType,
+        string calldata ipfsHash,
+        bytes32 encryptedHash
+    ) external {
+        require(accessControl.checkAccess(patientId, msg.sender), "No patient access");
+        _add(patientId, recordType, ipfsHash, encryptedHash, msg.sender);
+    }
+    function addRecordFor(
+        uint256 patientId,
+        address doctor,
+        string calldata recordType,
+        string calldata ipfsHash,
+        bytes32 encryptedHash
+    ) external onlyOwner {
+        require(accessControl.checkAccess(patientId, doctor), "No patient access");
+        _add(patientId, recordType, ipfsHash, encryptedHash, doctor);
+    }
+    function _add(
+        uint256 patientId,
+        string calldata recordType,
+        string calldata ipfsHash,
+        bytes32 encryptedHash,
+        address doctor
+    ) internal {
+        uint256 version = _records[patientId].length + 1;
+        _records[patientId].push(
+            Record(version, recordType, ipfsHash, encryptedHash, doctor, uint64(block.timestamp))
+        );
+        emit RecordAdded(patientId, version, recordType, doctor);
+    }
+    function getRecords(uint256 patientId) external view returns (Record[] memory) {
+        require(accessControl.checkAccess(patientId, msg.sender), "No patient access");
+        return _records[patientId];
+    }
+    function recordCount(uint256 patientId) external view override returns (uint256) {
+        return _records[patientId].length;
+    }
+}
+````
+
+## File: contracts/PatientRegistry.sol
+````solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+/// @title PatientRegistry
+/// @notice Maps a wallet to a pseudonymous patient identity and encrypted-data hashes.
+contract PatientRegistry is Ownable {
+    struct Patient { uint256 id; bytes32 basicInfoHash; bytes32 criticalInfoHash; uint64 registeredAt; bool active; }
+    uint256 private _nextPatientId = 1;
+    mapping(address => Patient) private _patients;
+    mapping(uint256 => address) private _patientOwner;
+    event PatientRegistered(uint256 indexed patientId, address indexed patient, bytes32 basicInfoHash);
+    event PatientHashesUpdated(uint256 indexed patientId, bytes32 basicInfoHash, bytes32 criticalInfoHash);
+    constructor(address initialOwner) Ownable(initialOwner) {}
+    function registerPatient(bytes32 basicInfoHash, bytes32 criticalInfoHash) external returns (uint256 patientId) {
+        return _register(msg.sender, basicInfoHash, criticalInfoHash);
+    }
+    function registerPatientFor(address patient, bytes32 basicInfoHash, bytes32 criticalInfoHash) external onlyOwner returns (uint256 patientId) {
+        return _register(patient, basicInfoHash, criticalInfoHash);
+    }
+    function _register(address patient, bytes32 basicInfoHash, bytes32 criticalInfoHash) internal returns (uint256 patientId) {
+        require(patient != address(0), "Invalid patient");
+        require(_patients[patient].id == 0, "Already registered");
+        patientId = _nextPatientId++;
+        _patients[patient] = Patient(patientId, basicInfoHash, criticalInfoHash, uint64(block.timestamp), true);
+        _patientOwner[patientId] = patient;
+        emit PatientRegistered(patientId, patient, basicInfoHash);
+    }
+    function updateHashes(bytes32 basicInfoHash, bytes32 criticalInfoHash) external {
+        _updateHashes(msg.sender, basicInfoHash, criticalInfoHash);
+    }
+    function updateHashesFor(address patient, bytes32 basicInfoHash, bytes32 criticalInfoHash) external onlyOwner {
+        _updateHashes(patient, basicInfoHash, criticalInfoHash);
+    }
+    function _updateHashes(address patientWallet, bytes32 basicInfoHash, bytes32 criticalInfoHash) internal {
+        Patient storage patient = _patients[patientWallet];
+        require(patient.id != 0 && patient.active, "Patient not found");
+        patient.basicInfoHash = basicInfoHash;
+        patient.criticalInfoHash = criticalInfoHash;
+        emit PatientHashesUpdated(patient.id, basicInfoHash, criticalInfoHash);
+    }
+    function getPatientId(address wallet) external view returns (uint256) { return _patients[wallet].id; }
+    function getPatient(uint256 patientId) external view returns (Patient memory) { address wallet = _patientOwner[patientId]; require(wallet != address(0), "Patient not found"); return _patients[wallet]; }
+    function ownerOfPatient(uint256 patientId) external view returns (address) { return _patientOwner[patientId]; }
+}
+````
+
+## File: frontend/src/components/AdminDashboard.jsx
+````javascript
+import { useEffect, useState } from "react";
+import { api } from "../api";
+export default function AdminDashboard() {
+  const [activeTab, setActiveTab] = useState("providers"); // 'providers' | 'patients' | 'audits'
+  const [providerStatus, setProviderStatus] = useState("pending");
+  const [providers, setProviders] = useState([]);
+  const [patients, setPatients] = useState([]);
+  const [audits, setAudits] = useState([]);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
+  const loadProviders = () =>
+    api.providers(providerStatus).then(setProviders).catch((e) => setError(e.message));
+  const loadPatients = () =>
+    api.allPatients().then(setPatients).catch((e) => setError(e.message));
+  const loadAudits = () =>
+    api.recentAudits().then(setAudits).catch((e) => setError(e.message));
+  useEffect(() => {
+    setError("");
+    if (activeTab === "providers") loadProviders();
+    else if (activeTab === "patients") loadPatients();
+    else if (activeTab === "audits") loadAudits();
+  }, [activeTab, providerStatus]);
+  const handleStatusChange = async (wallet, newStatus) => {
+    setBusy(wallet);
+    setError("");
+    try {
+      await api.updateProviderStatus(wallet, newStatus);
+      await loadProviders();
+    } catch (e) {
+      setError(e.message || "Failed to update provider status");
+    } finally {
+      setBusy("");
+    }
+  };
+  return (
+    <section className="dashboard">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">System Administration</p>
+          <h2>Governance & Compliance Dashboard</h2>
+        </div>
+        <span className="verified">● Admin Access</span>
+      </div>
+      <div className="panel">
+        <div className="admin-tabs" style={{ marginBottom: "1.5rem" }}>
+          <button
+            className={activeTab === "providers" ? "active" : ""}
+            onClick={() => setActiveTab("providers")}
+          >
+            Provider Management
+          </button>
+          <button
+            className={activeTab === "patients" ? "active" : ""}
+            onClick={() => setActiveTab("patients")}
+          >
+            Patient Oversight
+          </button>
+          <button
+            className={activeTab === "audits" ? "active" : ""}
+            onClick={() => setActiveTab("audits")}
+          >
+            Emergency Access Audits
+          </button>
+        </div>
+        {error && <p className="error">{error}</p>}
+        {activeTab === "providers" && (
+          <div>
+            <div className="admin-tabs" style={{ marginBottom: "1rem" }}>
+              <button
+                className={providerStatus === "pending" ? "active" : ""}
+                onClick={() => setProviderStatus("pending")}
+              >
+                Pending Verification
+              </button>
+              <button
+                className={providerStatus === "verified" ? "active" : ""}
+                onClick={() => setProviderStatus("verified")}
+              >
+                Verified Providers
+              </button>
+              <button
+                className={providerStatus === "suspended" ? "active" : ""}
+                onClick={() => setProviderStatus("suspended")}
+              >
+                Suspended Providers
+              </button>
+            </div>
+            {providers.length === 0 ? (
+              <p className="muted">No providers in {providerStatus} state.</p>
+            ) : (
+              providers.map((p) => (
+                <div className="data-row" key={p.id}>
+                  <span>
+                    <b>{p.name}</b>
+                    <small>
+                      {p.specialty} • License #{p.licenseNumber}
+                    </small>
+                    <small style={{ fontFamily: "monospace" }}>{p.wallet}</small>
+                  </span>
+                  <b>{p.status.toUpperCase()}</b>
+                  {p.status === "pending" && (
+                    <button
+                      className="secondary"
+                      disabled={!!busy}
+                      onClick={() => handleStatusChange(p.wallet, "verified")}
+                    >
+                      {busy === p.wallet ? "Verifying…" : "Approve Provider"}
+                    </button>
+                  )}
+                  {p.status === "verified" && (
+                    <button
+                      className="secondary"
+                      style={{ background: "#ef4444", color: "#fff" }}
+                      disabled={!!busy}
+                      onClick={() => handleStatusChange(p.wallet, "suspended")}
+                    >
+                      {busy === p.wallet ? "Updating…" : "Suspend Access"}
+                    </button>
+                  )}
+                  {p.status === "suspended" && (
+                    <button
+                      className="secondary"
+                      disabled={!!busy}
+                      onClick={() => handleStatusChange(p.wallet, "verified")}
+                    >
+                      {busy === p.wallet ? "Updating…" : "Reactivate Provider"}
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+        {activeTab === "patients" && (
+          <div>
+            <h4>Registered Patient Identities ({patients.length})</h4>
+            {patients.length === 0 ? (
+              <p className="muted">No registered patients found.</p>
+            ) : (
+              patients.map((pt) => (
+                <div className="data-row" key={pt.id}>
+                  <span>
+                    <b>Patient ID: {pt.id}</b>
+                    <small style={{ fontFamily: "monospace" }}>Wallet: {pt.wallet}</small>
+                    <small>Registered: {new Date(pt.created_at || pt.createdAt).toLocaleString()}</small>
+                  </span>
+                  <div>
+                    <span className="badge">
+                      {pt.profile?.fullName || pt.profile?.name || "Pseudonymous"}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+        {activeTab === "audits" && (
+          <div>
+            <h4>Global Emergency Access Log</h4>
+            {audits.length === 0 ? (
+              <p className="muted">No emergency access events recorded.</p>
+            ) : (
+              audits.map((a) => (
+                <div className="data-row" key={a.id}>
+                  <span>
+                    <b>{a.action}</b>
+                    <small>Actor: {a.actor}</small>
+                    <small>Patient: {a.patient_id || a.patientId}</small>
+                    {a.metadata?.justification && (
+                      <small style={{ color: "#f59e0b" }}>
+                        Reason: {a.metadata.justification}
+                      </small>
+                    )}
+                  </span>
+                  <small>{new Date(a.created_at || a.timestamp).toLocaleString()}</small>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+````
+
+## File: frontend/src/components/PatientOnboarding.jsx
+````javascript
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { api } from "../api";
+export default function PatientOnboarding({ onComplete }) {
+  const navigate = useNavigate();
+  const [selectedRole, setSelectedRole] = useState("patient"); // 'patient' | 'doctor'
+  // Patient Fields
+  const [name, setName] = useState("");
+  const [bloodGroup, setBloodGroup] = useState("");
+  const [allergies, setAllergies] = useState("");
+  const [conditions, setConditions] = useState("");
+  const [medications, setMedications] = useState("");
+  // Provider Fields
+  const [docName, setDocName] = useState("");
+  const [licenseNumber, setLicenseNumber] = useState("");
+  const [specialty, setSpecialty] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const list = (value) =>
+    value
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
+  const submitPatient = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const patient = await api.registerPatient({
+        profile: { fullName: name, name },
+        critical: {
+          bloodGroup,
+          allergies: list(allergies),
+          conditions: list(conditions),
+          medications: list(medications),
+        },
+      });
+      onComplete(patient);
+      navigate("/patient/me");
+    } catch (err) {
+      setError(err.message || "Patient registration failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const submitProvider = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await api.registerProvider({
+        name: docName,
+        licenseNumber,
+        specialty,
+      });
+      onComplete({ role: "doctor" });
+      navigate("/doctor");
+    } catch (err) {
+      setError(err.message || "Provider registration failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="dashboard">
+      <div className="panel form-panel">
+        <p className="eyebrow">Account Onboarding & Role Selection</p>
+        <h2>Welcome to GoldenHour</h2>
+        <p className="muted">
+          Your wallet address is connected. Please select your account role to complete registration.
+        </p>
+        <div className="admin-tabs" style={{ marginBottom: "1.5rem" }}>
+          <button
+            type="button"
+            className={selectedRole === "patient" ? "active" : ""}
+            onClick={() => {
+              setSelectedRole("patient");
+              setError("");
+            }}
+          >
+            👤 Register as Patient
+          </button>
+          <button
+            type="button"
+            className={selectedRole === "doctor" ? "active" : ""}
+            onClick={() => {
+              setSelectedRole("doctor");
+              setError("");
+            }}
+          >
+            🩺 Register as Healthcare Provider
+          </button>
+        </div>
+        {selectedRole === "patient" ? (
+          <form onSubmit={submitPatient}>
+            <h3>Create Patient Emergency Profile</h3>
+            <label>
+              Full Name
+              <input
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="John Doe"
+              />
+            </label>
+            <label>
+              Blood Group
+              <input
+                required
+                value={bloodGroup}
+                onChange={(e) => setBloodGroup(e.target.value)}
+                placeholder="O+"
+              />
+            </label>
+            <label>
+              Allergies
+              <input
+                value={allergies}
+                onChange={(e) => setAllergies(e.target.value)}
+                placeholder="Penicillin, Peanuts (Comma separated)"
+              />
+            </label>
+            <label>
+              Pre-existing Conditions
+              <input
+                value={conditions}
+                onChange={(e) => setConditions(e.target.value)}
+                placeholder="Asthma, Diabetes (Comma separated)"
+              />
+            </label>
+            <label>
+              Current Medications
+              <input
+                value={medications}
+                onChange={(e) => setMedications(e.target.value)}
+                placeholder="Albuterol, Insulin (Comma separated)"
+              />
+            </label>
+            <button className="primary full" disabled={busy} style={{ marginTop: "1rem" }}>
+              {busy ? "Registering Profile…" : "Create Patient Profile"}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={submitProvider}>
+            <h3>Register Healthcare Provider Account</h3>
+            <p className="muted">
+              Note: Provider registrations require administrator verification before clinical features are unlocked.
+            </p>
+            <label>
+              Full Name
+              <input
+                required
+                value={docName}
+                onChange={(e) => setDocName(e.target.value)}
+                placeholder="Dr. Sarah Jenkins, MD"
+              />
+            </label>
+            <label>
+              Medical License Number
+              <input
+                required
+                value={licenseNumber}
+                onChange={(e) => setLicenseNumber(e.target.value)}
+                placeholder="MD-88491-CA"
+              />
+            </label>
+            <label>
+              Medical Specialty
+              <input
+                required
+                value={specialty}
+                onChange={(e) => setSpecialty(e.target.value)}
+                placeholder="Trauma & Emergency Medicine"
+              />
+            </label>
+            <button className="primary full" disabled={busy} style={{ marginTop: "1rem" }}>
+              {busy ? "Submitting Registration…" : "Submit Provider Registration for Approval"}
+            </button>
+          </form>
+        )}
+        {error && <p className="error" style={{ color: "#ef4444", marginTop: "1rem" }}>{error}</p>}
+      </div>
+    </section>
+  );
+}
+````
+
+## File: frontend/src/components/QRCodeCard.jsx
+````javascript
+import { QRCodeSVG } from "qrcode.react";
+export default function QRCodeCard({ patientId }) {
+  const url = `${window.location.origin}/emergency/${patientId}`;
+  return (
+    <div className="qr">
+      <QRCodeSVG value={url} size={112} />
+      <div>
+        <b>Emergency QR Card</b>
+        <p>Verified clinicians can scan this code to launch logged, break-glass critical access.</p>
+        <button
+          className="text-button"
+          onClick={() => navigator.clipboard?.writeText(url)}
+        >
+          Copy Emergency Link →
+        </button>
+      </div>
+    </div>
+  );
+}
+````
+
+## File: frontend/src/hooks/useContract.js
+````javascript
+import { ethers } from "ethers";
+const addresses = { registry: import.meta.env.VITE_REGISTRY_ADDRESS, accessControl: import.meta.env.VITE_ACCESS_CONTROL_ADDRESS, records: import.meta.env.VITE_RECORDS_ADDRESS, emergency: import.meta.env.VITE_EMERGENCY_ADDRESS };
+const registryAbi = ["function registerPatient(bytes32,bytes32) returns (uint256)", "function getPatientId(address) view returns (uint256)"];
+export function useContract() { const connect = async () => { if (!window.ethereum) throw new Error("MetaMask or a compatible wallet is required"); const provider = new ethers.BrowserProvider(window.ethereum); await provider.send("eth_requestAccounts", []); const signer = await provider.getSigner(); return { provider, signer, address: await signer.getAddress() }; }; const getRegistry = async () => { const { signer } = await connect(); if (!addresses.registry) throw new Error("VITE_REGISTRY_ADDRESS is not configured"); return new ethers.Contract(addresses.registry, registryAbi, signer); }; const registerPatient=async(profile,critical)=>{const registry=await getRegistry(),tx=await registry.registerPatient(ethers.id(JSON.stringify(profile)),ethers.id(JSON.stringify(critical)));return tx.wait()}; return { addresses, connect, getRegistry, registerPatient, configured: Boolean(addresses.registry) }; }
+````
+
+## File: frontend/package.json
+````json
+{
+  "name": "golden-hour-frontend",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "ethers": "^6.13.4",
+    "qrcode.react": "^4.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0",
+    "vite": "^5.4.8"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.5"
+  }
+}
+````
+
+## File: test/GoldenHour.test.js
+````javascript
+const { expect } = require("chai");
+const { ethers } = require("hardhat");
+const { time } = require("@nomicfoundation/hardhat-network-helpers");
+describe("GoldenHour contracts", function () {
+  async function deploy() {
+    const [owner, patient, doctor, stranger] = await ethers.getSigners();
+    const Registry=await ethers.getContractFactory("PatientRegistry");const registry=await Registry.deploy(owner.address);
+    const Access=await ethers.getContractFactory("contracts/AccessControl.sol:AccessControl");const access=await Access.deploy(owner.address,await registry.getAddress());
+    const Records=await ethers.getContractFactory("MedicalRecord");const records=await Records.deploy(await access.getAddress(),owner.address);
+    const Audit=await ethers.getContractFactory("AuditLog");const audit=await Audit.deploy(owner.address);
+    const Emergency=await ethers.getContractFactory("EmergencyAccess");const emergency=await Emergency.deploy(await registry.getAddress(),await access.getAddress(),await audit.getAddress(),owner.address);
+    await audit.transferOwnership(await emergency.getAddress());await access.grantRole(await access.VERIFIER_ROLE(),owner.address);await access.grantRole(await access.VERIFIER_ROLE(),doctor.address);await access.connect(doctor).setProviderVerified(doctor.address,true);
+    return{owner,patient,doctor,stranger,registry,access,records,audit,emergency};
+  }
+  it("registers unique patients and stores only hashes",async function(){const{registry,patient}=await deploy();await expect(registry.connect(patient).registerPatient(ethers.id("profile"),ethers.id("critical"))).to.emit(registry,"PatientRegistered");expect(await registry.getPatientId(patient.address)).to.equal(1);await expect(registry.connect(patient).registerPatient(ethers.id("x"),ethers.id("y"))).to.be.revertedWith("Already registered")});
+  it("supports verified, time-bound access and append-only records",async function(){const{registry,access,records,patient,doctor}=await deploy();await registry.connect(patient).registerPatient(ethers.id("profile"),ethers.id("critical"));await expect(records.connect(doctor).addRecord(1,"allergy","ipfs://demo",ethers.id("encrypted"))).to.be.revertedWith("No patient access");await access.connect(patient).grantAccess(1,doctor.address,0);await records.connect(doctor).addRecord(1,"allergy","ipfs://demo",ethers.id("encrypted"));expect(await records.recordCount(1)).to.equal(1)});
+  it("supports trusted relay operations without changing wallet ownership semantics",async function(){const{registry,access,records,emergency,owner,patient,doctor}=await deploy();await registry.connect(owner).registerPatientFor(patient.address,ethers.id("profile"),ethers.id("critical"));expect(await registry.getPatientId(patient.address)).to.equal(1);await access.connect(owner).grantAccessFor(patient.address,1,doctor.address,0);await records.connect(owner).addRecordFor(1,doctor.address,"lab","ipfs://demo",ethers.id("encrypted"));expect(await records.recordCount(1)).to.equal(1);await emergency.connect(owner).triggerEmergencyAccessFor(1,doctor.address,"Relay emergency access justification");});
+  it("rejects unverified providers and enforces patient ownership",async function(){const{registry,access,patient,doctor,stranger}=await deploy();await registry.connect(patient).registerPatient(ethers.id("profile"),ethers.id("critical"));await expect(access.connect(stranger).grantAccess(1,doctor.address,0)).to.be.revertedWith("Not patient owner");await expect(access.connect(patient).grantAccess(1,stranger.address,0)).to.be.revertedWith("Provider not verified");await expect(access.connect(patient).grantAccess(1,doctor.address,1)).to.be.revertedWith("Invalid expiry")});
+  it("supports expiry and revocation",async function(){const{registry,access,patient,doctor}=await deploy();await registry.connect(patient).registerPatient(ethers.id("profile"),ethers.id("critical"));const expiry=(await time.latest())+60;await access.connect(patient).grantAccess(1,doctor.address,expiry);expect(await access.checkAccess(1,doctor.address)).to.equal(true);await time.increaseTo(expiry+1);expect(await access.checkAccess(1,doctor.address)).to.equal(false);await access.connect(patient).grantAccess(1,doctor.address,0);await access.connect(patient).revokeAccess(1,doctor.address);expect(await access.checkAccess(1,doctor.address)).to.equal(false)});
+  it("logs justified emergency access",async function(){const{registry,access,audit,emergency,patient,doctor}=await deploy();await registry.connect(patient).registerPatient(ethers.id("profile"),ethers.id("critical"));await expect(emergency.connect(doctor).triggerEmergencyAccess(1,"Unconscious trauma patient")).to.emit(emergency,"EmergencyTriggered");expect(await audit.entryCount(1)).to.equal(1)});
+});
+````
+
+## File: backend/src/config/migrate.js
+````javascript
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, "../../.env") });
+require("dotenv").config();
+const fs = require("fs");
+const { Pool } = require("pg");
+if (!process.env.DATABASE_URL && require.main === module) {
+  throw new Error("DATABASE_URL required for running database migrations");
+}
+function getDbSslConfig() {
+  if (process.env.DB_SSL !== "true") return undefined;
+  const isProduction = process.env.NODE_ENV === "production";
+  if (isProduction && !process.env.DB_CA) {
+    throw new Error("DB_CA certificate path is strictly required in production when DB_SSL is enabled");
+  }
+  // Reject unauthorized by default unless explicitly disabled with DB_REJECT_UNAUTHORIZED="false"
+  const rejectUnauthorized = process.env.DB_REJECT_UNAUTHORIZED !== "false";
+  if (process.env.DB_CA) {
+    return {
+      ca: fs.readFileSync(process.env.DB_CA).toString(),
+      rejectUnauthorized,
+    };
+  }
+  return { rejectUnauthorized };
+}
+async function runMigrations() {
+  if (!process.env.DATABASE_URL) return;
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: getDbSslConfig(),
+  });
+  const client = await pool.connect();
+  try {
+    // Acquire session-level advisory lock on dedicated client
+    await client.query("SELECT pg_advisory_lock(849204819);");
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        filename VARCHAR(255) PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    const migrationsDir = path.join(__dirname, "../../migrations");
+    if (fs.existsSync(migrationsDir)) {
+      const files = fs
+        .readdirSync(migrationsDir)
+        .filter((file) => file.endsWith(".sql"))
+        .sort();
+      for (const file of files) {
+        const res = await client.query(
+          "SELECT filename FROM schema_migrations WHERE filename = $1",
+          [file]
+        );
+        if (res.rowCount === 0) {
+          const sql = fs.readFileSync(path.join(migrationsDir, file), "utf8");
+          try {
+            await client.query("BEGIN");
+            await client.query(sql);
+            await client.query(
+              "INSERT INTO schema_migrations (filename) VALUES ($1)",
+              [file]
+            );
+            await client.query("COMMIT");
+            console.log(`Successfully applied migration: ${file}`);
+          } catch (err) {
+            await client.query("ROLLBACK");
+            console.error(`Migration failed on file ${file}:`, err);
+            throw err;
+          }
+        } else {
+          console.log(`Migration ${file} already applied.`);
+        }
+      }
+    }
+    console.log("All database migrations complete.");
+  } finally {
+    try {
+      await client.query("SELECT pg_advisory_unlock(849204819);");
+    } catch (e) {
+      console.warn("Could not release advisory lock:", e.message);
+    }
+    client.release();
+    await pool.end();
+  }
+}
+if (require.main === module) {
+  runMigrations().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
+module.exports = { runMigrations, getDbSslConfig };
+````
+
+## File: backend/src/controllers/consentController.js
+````javascript
+const crypto = require("crypto");
+const { canonicalizeWallet } = require("../config/db");
+const ALLOWED_SCOPES = ["records"];
+function validateScope(scope) {
+  if (!scope) return ["records"];
+  if (!Array.isArray(scope)) return null;
+  if (scope.length === 0) return null;
+  for (const s of scope) {
+    if (typeof s !== "string" || !ALLOWED_SCOPES.includes(s)) {
+      return null;
+    }
+  }
+  return scope;
+}
+function createConsentController({ store, chain }) {
+  return {
+    grant: async (req, res) => {
+      const patient = await store.patientById(req.params.patientId);
+      if (!patient) return res.status(404).json({ error: "Patient not found" });
+      const reqWallet = canonicalizeWallet(req.user.wallet);
+      const patientWallet = canonicalizeWallet(patient.wallet);
+      if (req.user.role === "admin") {
+        return res.status(403).json({ error: "Administrators have read-only consent oversight" });
+      }
+      if (patientWallet !== reqWallet) {
+        return res.status(403).json({ error: "Only the patient can grant consent" });
+      }
+      const providerWallet = canonicalizeWallet(req.body.wallet);
+      const provider = await store.providerByWallet(providerWallet);
+      if (!provider || provider.status !== "verified") {
+        return res.status(400).json({ error: "A verified provider wallet is required" });
+      }
+      const scope = validateScope(req.body.scope);
+      if (!scope) {
+        return res.status(400).json({
+          error: `Invalid consent scope. Supported scopes: ${ALLOWED_SCOPES.join(", ")}`,
+        });
+      }
+      try {
+        if (chain.enabled) {
+          const chainPatientId = await chain.patientId(patient.wallet);
+          if (!chainPatientId) throw new Error("Patient is not registered on chain");
+          await chain.grantAccess(patient.wallet, chainPatientId, provider.wallet, 0);
+        }
+        const consent = await store.grantConsent({
+          id: crypto.randomUUID(),
+          patientId: patient.id,
+          providerId: provider.id,
+          scope,
+          grantedAt: new Date().toISOString(),
+        });
+        await store.addAudit({
+          id: crypto.randomUUID(),
+          patientId: patient.id,
+          actor: reqWallet,
+          action: "CONSENT_GRANTED",
+          providerId: provider.id,
+          metadata: { scope: consent.scope },
+          timestamp: new Date().toISOString(),
+        });
+        res.status(201).json({
+          ...consent,
+          providerWallet: provider.wallet,
+          providerName: provider.name,
+          providerSpecialty: provider.specialty,
+        });
+      } catch (e) {
+        console.error("Consent grant error:", e);
+        res.status(502).json({ error: "Consent grant failed" });
+      }
+    },
+    revoke: async (req, res) => {
+      const patient = await store.patientById(req.params.patientId);
+      if (!patient) return res.status(404).json({ error: "Patient not found" });
+      const reqWallet = canonicalizeWallet(req.user.wallet);
+      const patientWallet = canonicalizeWallet(patient.wallet);
+      if (patientWallet !== reqWallet) {
+        return res.status(403).json({ error: "Only the patient can revoke consent" });
+      }
+      const providerWallet = canonicalizeWallet(req.body.wallet);
+      const provider = await store.providerByWallet(providerWallet);
+      if (!provider) return res.status(404).json({ error: "Provider not found" });
+      try {
+        if (chain.enabled) {
+          const chainPatientId = await chain.patientId(patient.wallet);
+          if (!chainPatientId) throw new Error("Patient is not registered on chain");
+          await chain.revokeAccess(patient.wallet, chainPatientId, provider.wallet);
+        }
+        const consent = await store.revokeConsent(patient.id, provider.id);
+        if (!consent) return res.status(404).json({ error: "Active consent not found" });
+        await store.addAudit({
+          id: crypto.randomUUID(),
+          patientId: patient.id,
+          actor: reqWallet,
+          action: "CONSENT_REVOKED",
+          providerId: provider.id,
+          timestamp: new Date().toISOString(),
+        });
+        res.json({
+          ...consent,
+          providerWallet: provider.wallet,
+          providerName: provider.name,
+          providerSpecialty: provider.specialty,
+        });
+      } catch (e) {
+        console.error("Consent revoke error:", e);
+        res.status(502).json({ error: "Consent revoke failed" });
+      }
+    },
+    list: async (req, res) => {
+      const patient = await store.patientById(req.params.patientId);
+      if (!patient) return res.status(404).json({ error: "Patient not found" });
+      const reqWallet = canonicalizeWallet(req.user.wallet);
+      const patientWallet = canonicalizeWallet(patient.wallet);
+      if (req.user.role !== "admin" && patientWallet !== reqWallet) {
+        return res.status(403).json({ error: "Consent access denied" });
+      }
+      res.json(await store.consentsForPatient(patient.id));
+    },
+    listForProvider: async (req, res) => {
+      const reqWallet = canonicalizeWallet(req.user.wallet);
+      const provider = await store.providerByWallet(reqWallet);
+      if (!provider || provider.status !== "verified") {
+        return res.status(403).json({ error: "Active verified provider context required" });
+      }
+      res.json(await store.consentsForProvider(provider.id));
+    },
+  };
+}
+module.exports = { createConsentController };
+````
+
+## File: backend/src/routes/recordRoutes.js
+````javascript
+const express=require("express");const{requireAuth}=require("../middleware/authMiddleware");const{requireVerifiedProvider}=require("../middleware/roleCheck");module.exports=(c,store)=>{const r=express.Router();r.post("/",requireAuth,requireVerifiedProvider(store),c.create);r.get("/:patientId",requireAuth,c.list);r.get("/:patientId/:recordId",requireAuth,c.detail);return r};
+````
+
+## File: docs/api.md
+````markdown
+# API notes
+
+All routes except `GET /health` and nonce/verification endpoints require a bearer JWT. JWTs expire after one hour. Wallets in `ADMIN_WALLETS` are admins, registered providers are doctors, and other authenticated wallets are patients. Provider status is checked live for clinical authorization.
+
+| Method | Endpoint | Role | Purpose |
+|---|---|---|---|
+| `GET` | `/health` | Public | API and chain-relay status. |
+| `GET` | `/api/auth/nonce/:wallet` | Public | Five-minute wallet-signature challenge. |
+| `POST` | `/api/auth/verify` | Public | Verifies the signed challenge and issues a JWT. |
+| `POST` | `/api/patients` | Authenticated | Registers the wallet's profile and critical data; synchronizes `PatientRegistry` when chain relay is configured. |
+| `GET` | `/api/patients/me` | Authenticated | Resolves the signed-in wallet's patient identifier. |
+| `GET` | `/api/patients/:id` | Patient/Admin | Returns patient profile, record metadata, and audit events. |
+| `POST` | `/api/records` | Verified Doctor | Requires active consent, encrypts clinical data, stores it on IPFS, persists metadata, and synchronizes `MedicalRecord` when configured. |
+| `GET` | `/api/records/:patientId` | Patient / Consented Doctor / Admin | Lists record metadata. |
+| `GET` | `/api/records/:patientId/:recordId` | Patient / Consented Doctor / Admin | Fetches and decrypts the encrypted clinical payload after authorization. |
+| `POST` | `/api/emergency-access` | Verified Doctor | Creates a 15-minute break-glass grant and synchronizes the emergency event on-chain when configured. |
+| `GET` | `/api/emergency-access/critical/:accessId` | Emergency Actor / Admin | Returns critical-only data while the 15-minute grant is valid; expired access returns `410`. |
+| `GET` | `/api/emergency-access/:patientId` | Patient / Admin | Lists emergency audit events. |
+| `GET` | `/api/doctors/access` | Authenticated | Returns provider status and permissions. |
+| `GET` | `/api/doctors?status=pending` | Admin | Lists providers awaiting verification. |
+| `POST` | `/api/doctors/:wallet/verify` | Admin | Verifies a provider and synchronizes on-chain provider status when configured. |
+
+## Consent
+
+Patients grant/revoke consent through the consent endpoints. Administrators have read-only oversight through `GET /api/consents/:patientId`. Consent responses include `providerWallet`, `providerName`, and `providerSpecialty`, so clients can revoke using the real provider wallet. When chain relay integration is configured, grant/revoke is synchronized to `AccessControl`.
+
+## Storage and encryption
+
+The default local store is `.data/goldenhour.json`; `DATA_FILE` can override it. Production deployments should use a durable database and secure key management. Clinical data uses AES-256-GCM before IPFS persistence. The record-detail endpoint decrypts only after patient, consented verified-provider, or admin authorization.
+
+## Chain integration
+
+Chain integration is implemented as a trusted backend relay. `PatientRegistry`, `AccessControl`, `MedicalRecord`, and `EmergencyAccess` expose explicit relay operations while retaining direct wallet operations. Deploy with the updated `scripts/deploy.js` and configure `RPC_URL`, `BACKEND_PRIVATE_KEY`, `REGISTRY_ADDRESS`, `ACCESS_CONTROL_ADDRESS`, `RECORDS_ADDRESS`, `AUDIT_ADDRESS`, and `EMERGENCY_ADDRESS`. The backend signer must have the required contract permissions. Without this configuration, the API intentionally remains usable in local/off-chain mode.
+
+The frontend `useContract` helper remains available for direct wallet interaction, but patient registration is coordinated through the authenticated API flow so the backend can keep database and chain state aligned. After provider verification, an already-issued JWT retains its original role claim until it expires or the user signs in again; live provider-status checks still govern clinical access.
+````
+
+## File: frontend/src/components/ConsentManager.jsx
+````javascript
+import { useEffect, useState } from "react";
+import { api } from "../api";
+export default function ConsentManager({ patientId }) {
+  const [wallet, setWallet] = useState("");
+  const [items, setItems] = useState([]);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = () => {
+    if (!patientId) return;
+    api.consents(patientId).then(setItems).catch((e) => setError(e.message));
+  };
+  useEffect(load, [patientId]);
+  const grant = async (e) => {
+    e.preventDefault();
+    if (!wallet.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.grantConsent(patientId, { wallet: wallet.trim(), scope: ["records"] });
+      setWallet("");
+      await load();
+    } catch (e) {
+      setError(e.message || "Failed to grant consent");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const revoke = async (providerWallet) => {
+    setBusy(true);
+    setError("");
+    try {
+      await api.revokeConsent(patientId, { wallet: providerWallet });
+      await load();
+    } catch (e) {
+      setError(e.message || "Failed to revoke consent");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <article className="panel wide">
+      <h3>Provider Consent Management</h3>
+      <p className="muted">
+        Grant verified clinicians access to view your encrypted medical records. Scope is restricted to medical records (`records`).
+      </p>
+      <form className="inline-form" onSubmit={grant} style={{ marginTop: "1rem" }}>
+        <input
+          required
+          value={wallet}
+          onChange={(e) => setWallet(e.target.value)}
+          placeholder="Verified Provider Wallet (0x...)"
+        />
+        <button className="secondary" disabled={busy}>
+          {busy ? "Processing…" : "Grant Consent"}
+        </button>
+      </form>
+      {error && <p className="error" style={{ color: "#ef4444", marginTop: "0.5rem" }}>{error}</p>}
+      <div style={{ marginTop: "1rem" }}>
+        {items.length === 0 ? (
+          <p className="muted">No active or historic consent grants.</p>
+        ) : (
+          items.map((x) => (
+            <div className="data-row" key={x.id}>
+              <span>
+                <b>{x.providerName || "Clinician Provider"}</b>
+                <small style={{ fontFamily: "monospace" }}>{x.providerWallet || "Wallet unavailable"}</small>
+                <small>Granted: {new Date(x.grantedAt || x.granted_at).toLocaleString()}</small>
+              </span>
+              <b>{x.status.toUpperCase()}</b>
+              {x.status === "active" && x.providerWallet && (
+                <button className="text-button" disabled={busy} onClick={() => revoke(x.providerWallet)}>
+                  Revoke Access
+                </button>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </article>
+  );
+}
+````
+
+## File: frontend/src/components/RecordTimeline.jsx
+````javascript
+export default function RecordTimeline({records=[],onView}){return <div className="timeline">{records.length?records.map(record=><div key={record.id}><span>{new Date(record.createdAt).toLocaleDateString()}</span><b>{record.recordType}</b><small>{record.doctorId} • {record.ipfsCid}</small>{onView&&<button className="text-button" onClick={()=>onView(record.id)}>View clinical data</button>}</div>):<p className="muted">No records have been added yet.</p>}</div>}
+````
+
+## File: frontend/src/styles.css
+````css
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap');
+:root {
+  font-family: 'Plus Jakarta Sans', 'Manrope', system-ui, sans-serif;
+  color: #f8fafc;
+  background-color: #000000;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: #000000;
+  color: #f8fafc;
+  min-height: 100vh;
+  background-image: 
+    radial-gradient(circle at 15% 15%, rgba(16, 185, 129, 0.08) 0%, transparent 45%),
+    radial-gradient(circle at 85% 85%, rgba(56, 189, 248, 0.06) 0%, transparent 45%);
+  background-attachment: fixed;
+}
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+/* Glass Header */
+header {
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 6vw;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: #ffffff;
+}
+.brand strong {
+  display: block;
+  font-size: 18px;
+  letter-spacing: -0.5px;
+  font-weight: 800;
+}
+.brand small {
+  display: block;
+  color: #94a3b8;
+  font-size: 11px;
+  margin-top: 1px;
+}
+.mark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+  font: 700 12px 'DM Mono', monospace;
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.4);
+}
+/* Nav & Links */
+nav {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+nav a, nav button, .text-button {
+  border: 0;
+  background: transparent;
+  color: #94a3b8;
+  font: 600 13px 'Plus Jakarta Sans', sans-serif;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+nav a:hover, nav button:hover, .text-button:hover {
+  color: #34d399;
+  text-shadow: 0 0 8px rgba(52, 211, 153, 0.3);
+}
+/* Buttons */
+.wallet, .primary {
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  border-radius: 10px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 12px 20px;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 20px rgba(16, 185, 129, 0.25);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.wallet:hover, .primary:hover {
+  background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+  box-shadow: 0 6px 24px rgba(16, 185, 129, 0.45);
+  transform: translateY(-1px);
+}
+.logout-btn {
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 10px 18px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.logout-btn:hover {
+  background: rgba(239, 68, 68, 0.3);
+  color: #ffffff;
+  border-color: #ef4444;
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.35);
+  transform: translateY(-1px);
+}
+.secondary {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #f1f5f9;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 12px 20px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(10px);
+  text-decoration: none;
+}
+.secondary:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+/* Main Layout */
+main {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 60px 6vw;
+  flex: 1;
+  width: 100%;
+}
+/* Hero Section */
+.hero {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 60px;
+  align-items: center;
+  padding-bottom: 80px;
+}
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: #34d399;
+  font: 600 11px 'DM Mono', monospace;
+  margin: 0 0 16px;
+}
+.hero h1 {
+  font-size: clamp(42px, 5.5vw, 72px);
+  line-height: 1.05;
+  letter-spacing: -2.5px;
+  font-weight: 800;
+  margin: 0;
+  color: #ffffff;
+}
+.hero h1 em {
+  font-style: normal;
+  background: linear-gradient(135deg, #34d399 0%, #38bdf8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.lead {
+  font-size: 17px;
+  line-height: 1.8;
+  color: #94a3b8;
+  max-width: 540px;
+  margin: 24px 0 32px;
+}
+.hero-actions {
+  display: flex;
+  gap: 16px;
+}
+/* Glass Panels & Cards */
+.panel {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  padding: 28px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: border-color 0.25s ease;
+}
+.panel:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+.wide {
+  grid-column: 1 / -1;
+}
+.panel h3 {
+  margin: 0 0 20px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #ffffff;
+}
+.muted {
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.6;
+}
+/* Dashboard & Grid */
+.dashboard {
+  padding-bottom: 40px;
+}
+.section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 28px;
+}
+.section-heading h2 {
+  font-size: 32px;
+  letter-spacing: -1.2px;
+  font-weight: 800;
+  margin: 0;
+  color: #ffffff;
+}
+.verified {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 30px;
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+/* Profile Avatar & Items */
+.profile {
+  text-align: center;
+}
+.avatar {
+  margin: 0 auto 16px;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(56, 189, 248, 0.2) 100%);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  border-radius: 50%;
+  font-weight: 800;
+  color: #34d399;
+  font-size: 20px;
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.2);
+}
+.critical {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(16, 185, 129, 0.05);
+  border: 1px solid rgba(16, 185, 129, 0.15);
+  border-radius: 12px;
+  padding: 16px;
+  margin-top: 20px;
+  text-align: left;
+  font-size: 13px;
+}
+.critical strong {
+  color: #34d399;
+  font-size: 16px;
+}
+/* QR Code Card */
+.qr {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 20px;
+  padding-top: 20px;
+  display: flex;
+  text-align: left;
+  gap: 18px;
+  align-items: center;
+}
+.qr svg {
+  background: #ffffff;
+  padding: 8px;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+.qr p {
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.5;
+  margin: 6px 0 10px;
+}
+/* Data Rows */
+.data-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 13px;
+  gap: 16px;
+}
+.data-row:last-child {
+  border-bottom: none;
+}
+.data-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.data-row b {
+  color: #ffffff;
+}
+.data-row small {
+  display: block;
+  color: #64748b;
+  font: 400 11px 'DM Mono', monospace;
+  overflow-wrap: anywhere;
+}
+/* Form Controls */
+.form-panel {
+  max-width: 580px;
+  margin: 0 auto;
+}
+.form-panel label, .panel form label {
+  display: block;
+  margin: 16px 0 8px;
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.form-panel input, .panel form input, .panel form textarea, .panel > input, .panel > textarea {
+  display: block;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #ffffff;
+  font: 14px 'Plus Jakarta Sans', sans-serif;
+  outline: none;
+  transition: all 0.2s ease;
+  resize: vertical;
+}
+.form-panel input:focus, .panel form input:focus, .panel form textarea:focus, .panel > input:focus, .panel > textarea:focus {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.03);
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.2);
+}
+.full {
+  width: 100%;
+  margin-top: 14px;
+}
+/* Admin & Tabs */
+.admin-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 20px;
+}
+.admin-tabs button {
+  border: 0;
+  background: transparent;
+  padding: 12px 18px;
+  color: #94a3b8;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-bottom: 2px solid transparent;
+}
+.admin-tabs button:hover {
+  color: #f1f5f9;
+}
+.admin-tabs button.active {
+  color: #34d399;
+  border-bottom-color: #34d399;
+}
+/* Banners & Notifications */
+.emergency-banner {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 16px;
+  padding: 20px 24px;
+  margin-bottom: 32px;
+  backdrop-filter: blur(10px);
+}
+.warning {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #ef4444;
+  color: #ffffff;
+  font-weight: 800;
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.4);
+}
+.emergency-banner b {
+  font-size: 15px;
+  color: #fca5a5;
+}
+.emergency-banner p {
+  margin: 4px 0 0;
+  color: #f87171;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.critical-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.critical-grid div {
+  background: rgba(16, 185, 129, 0.06);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 16px;
+  padding: 20px;
+  backdrop-filter: blur(10px);
+}
+.critical-grid span {
+  display: block;
+  color: #94a3b8;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+}
+.critical-grid strong {
+  font-size: 20px;
+  color: #34d399;
+}
+.success {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 10px;
+  padding: 14px;
+  font-size: 13px;
+  margin-top: 14px;
+}
+.error {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 10px;
+  padding: 14px;
+  font-size: 13px;
+  margin-top: 14px;
+}
+.record-detail pre {
+  white-space: pre-wrap;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 18px;
+  font: 12px 'DM Mono', monospace;
+  color: #38bdf8;
+  max-height: 380px;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 28px 6vw;
+  color: #64748b;
+  font-size: 12px;
+  display: flex;
+  justify-content: space-between;
+  background: rgba(0, 0, 0, 0.8);
+}
+@media (max-width: 850px) {
+  header {
+    padding: 0 20px;
+  }
+  nav {
+    display: none;
+  }
+  main {
+    padding: 40px 20px;
+  }
+  .hero {
+    grid-template-columns: 1fr;
+    gap: 40px;
+  }
+  .grid, .doctor-grid {
+    grid-template-columns: 1fr;
+  }
+  .critical-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+````
+
+## File: .env.example
+````
+# Root / backend local configuration. Never commit real secrets.
+PORT=4000
+FRONTEND_ORIGIN=http://localhost:5173
+JWT_SECRET=replace-with-a-long-random-secret
+ENCRYPTION_KEY=replace-with-a-long-random-encryption-key
+RPC_URL=http://127.0.0.1:8545
+BACKEND_PRIVATE_KEY=
+DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require&channel_binding=require
+DB_SSL=true
+DB_POOL_SIZE=10
+REGISTRY_ADDRESS=
+ACCESS_CONTROL_ADDRESS=
+RECORDS_ADDRESS=
+AUDIT_ADDRESS=
+EMERGENCY_ADDRESS=
+PINATA_JWT=
+DATA_FILE=.data/goldenhour.json
+ADMIN_WALLETS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266,0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c
+ALLOW_DEMO_LOGIN=true
+
+# Frontend values are read from frontend/.env.local
+# VITE_API_URL=http://localhost:4000
+# VITE_REGISTRY_ADDRESS=
+# VITE_ACCESS_CONTROL_ADDRESS=
+# VITE_RECORDS_ADDRESS=
+# VITE_AUDIT_ADDRESS=
+# VITE_EMERGENCY_ADDRESS=
+````
+
+## File: package.json
+````json
+{
+  "name": "golden-hour",
+  "private": true,
+  "version": "1.1.0",
+  "description": "GoldenHour emergency medical history access system",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "node": "hardhat node",
+    "deploy:local": "hardhat run scripts/deploy.js --network localhost",
+    "deploy:wire": "hardhat run scripts/wireLocalDeployment.js --network localhost",
+    "grant:local": "hardhat run scripts/grantAccess.js --network localhost",
+    "backend": "npm --prefix backend run dev",
+    "frontend": "npm --prefix frontend run dev",
+    "install:all": "npm install && npm --prefix backend install && npm --prefix frontend install",
+    "check": "npm run compile && npm test && npm --prefix backend run check && npm --prefix backend test && npm --prefix frontend run build && npm --prefix frontend test"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.18",
+    "@openzeppelin/contracts": "^5.0.2",
+    "dotenv": "^16.4.5"
+  }
+}
+````
+
+## File: README.md
+````markdown
+# 🏥 GoldenHour
+
+> **Privacy-First Emergency Medical Information Access System with Web3 Wallet Auth, Patient Consent Control, AES-256-GCM Encryption, PostgreSQL Persistence, and Ethereum Blockchain Auditability.**
+
+GoldenHour is a production-grade healthcare technology platform demonstrating how critical medical data can be accessed instantly in life-threatening emergencies **without sacrificing patient privacy or data sovereignty**.
+
+---
+
+## 🚀 Architecture Overview
+
+```
+                          ┌──────────────────────────┐
+                          │   React 18 + Vite Web App│
+                          └─────────────┬────────────┘
+                                        │ HTTPS / JSON RPC
+                                        ▼
+                          ┌──────────────────────────┐
+                          │   Express REST API Engine│
+                          │ ├── Wallet Auth (JWT)    │
+                          │ ├── Provider Lifecycle   │
+                          │ ├── Consent Enforcement  │
+                          │ └── Audit Logging        │
+                          └───────┬───────┬───────┬──┘
+                                  │       │       │
+              ┌───────────────────┘       │       └───────────────────┐
+              ▼                           ▼                           ▼
+  ┌───────────────────────┐   ┌───────────────────────┐   ┌───────────────────────┐
+  │ PostgreSQL Database   │   │ Decentralized IPFS    │   │  Ethereum / Hardhat   │
+  │ - Metadata & Indexing │   │ - Encrypted Payloads  │   │  - Smart Contracts    │
+  │ - Audit Logs & Scope  │   │ - AES-256-GCM Storage │   │  - Proof Commitments  │
+  └───────────────────────┘   └───────────────────────┘   └───────────────────────┘
+```
+
+---
+
+## ✨ Core Features & Technical Implementation
+
+### 1. Web3 EIP-191 Wallet Authentication & Address Canonicalization
+- Cryptographic challenge-response authentication using random cryptographic nonces and signature verification.
+- **Strict Canonicalization:** All wallet addresses are normalized using `ethers.getAddress(...)` across authentication, database storage, and authorization queries to prevent case-sensitivity bugs or identity duplicates.
+- **Provider Role Synchronization:** Role assignment dynamically checks provider verification status. Suspended providers are automatically demoted to patient-level role access.
+
+### 2. Provider Verification & Suspension Governance (`pending` → `verified` → `suspended`)
+- **Full Governance Lifecycle:** Clinicians submit professional credentials (name, license number, specialty).
+- **Admin Control:** Administrators approve or suspend providers via dedicated endpoints (`PATCH /api/doctors/:wallet/status`).
+- **Real-Time Revocation:** Suspended providers lose access to consented records and emergency break-glass functions immediately.
+
+### 3. Patient-Controlled Consent Management & Scope Whitelisting
+- Patients explicitly grant and revoke record access to specific verified clinicians.
+- **Scope Whitelisting:** Consent scope is strictly validated against an allowed whitelist (`['records']`) to prevent scope injection or data pollution.
+- Clinicians can query their active consented patient grants via `GET /api/consents/provider`.
+
+### 4. Time-Bounded (15-Minute) Emergency Break-Glass Workflow
+- In life-threatening situations where consent cannot be requested, verified clinicians trigger emergency break-glass access with mandatory clinical justification.
+- **View-Level Audit Logging:** Access creates a 15-minute time-bounded session. Every individual view of the critical payload triggers a dedicated audit log (`EMERGENCY_CRITICAL_VIEW`).
+- **Dynamic Re-verification:** Clinician status is re-verified upon critical data retrieval to block suspended providers from abusing active break-glass tokens.
+
+### 5. Encrypted Record Persistence & Payload Integrity Verification
+- Clinical records are encrypted on the backend using **AES-256-GCM** with unique initialization vectors (IV) and authentication tags before being pinned to IPFS.
+- **SHA-256 Pre-Decryption Check:** Before decrypting fetched IPFS content, the backend recomputes the SHA-256 hash of the encrypted payload and verifies it against the database record hash (`encrypted_hash`) to guard against content tampering.
+
+### 6. Dynamic, Idempotent PostgreSQL Migration System
+- Dynamic migration runner ([backend/src/config/migrate.js](file:///c:/Users/welcome/Desktop/Golden-Hour/Golden-Hour/backend/src/config/migrate.js)) automatically discovers and transactionally executes all `.sql` scripts in alphabetical order.
+- Tracks migration state using a `schema_migrations` table to ensure safe, idempotent database boots across staging and production deployments.
+
+### 7. Ethereum Smart Contract Layer
+- Solidity contracts (`PatientRegistry`, `AccessControl`, `MedicalRecord`, `EmergencyAccess`, `AuditLog`) maintain on-chain patient identity hashes, verified provider roles, record CID commitments, and emergency event logs.
+
+---
+
+## 🛠️ Technology Stack
+
+| Layer | Technology |
+|---|---|
+| **Frontend** | React 18, Vite, React Router v6, QRCode.react, Ethers.js v6 |
+| **Backend** | Node.js 20+, Express.js, Helmet, Express-Rate-Limit, JSON Web Tokens (JWT) |
+| **Database** | PostgreSQL 16 (`pg`), Idempotent SQL Migrations |
+| **Storage & Security** | AES-256-GCM Encryption, IPFS / Pinata API Gateway |
+| **Smart Contracts** | Solidity 0.8.24, Hardhat, OpenZeppelin Contracts v5 |
+| **DevOps & CI** | Docker, Docker Compose, GitHub Actions |
+
+---
+
+## 🗄️ Database Schema & Migrations
+
+The database setup uses transactional PostgreSQL migrations located in `backend/migrations/`:
+
+| Migration File | Purpose | Key Tables Created |
+|---|---|---|
+| `001_initial.sql` | Base schema setup | `patients`, `providers`, `records`, `audit_logs` |
+| `002_consents.sql` | Patient-provider consent framework | `patient_provider_consents` |
+
+### Table Definitions Overview
+
+- **`patients`**: Stores patient UUID, canonical wallet address, profile JSON, and critical medical JSON.
+- **`providers`**: Tracks clinician credentials, verification status (`pending`, `verified`, `suspended`), and verifier metadata.
+- **`records`**: Stores encrypted IPFS payload CIDs, record types, clinician IDs, and SHA-256 payload hashes.
+- **`patient_provider_consents`**: Tracks active/revoked patient-to-provider access grants and scope arrays.
+- **`audit_logs`**: Append-only log of security, access, and break-glass emergency actions with metadata and timestamps.
+
+Run migrations against a PostgreSQL database:
+```bash
+npm --prefix backend run db:migrate
+```
+
+---
+
+## ⚙️ REST API Reference
+
+### Authentication & Self-Identity
+- `GET  /api/auth/nonce/:wallet` — Generate authentication nonce for wallet signature.
+- `POST /api/auth/verify` — Verify EIP-191 signature and issue JWT bearer token.
+
+### Patient Management
+- `GET  /api/patients/me` — Fetch current authenticated patient identity.
+- `POST /api/patients` — Register new patient identity and critical medical context.
+- `PUT  /api/patients/:id` — Update profile or critical medical info (triggers smart contract hash sync).
+- `GET  /api/patients/all` — Admin route to list registered patient identities.
+- `GET  /api/patients/:id` — Retrieve patient profile, records timeline, and audit logs.
+
+### Provider Management
+- `GET  /api/doctors/access` — Fetch current authenticated provider status and clinical permissions.
+- `POST /api/doctors/register` — Register clinician account (`pending` status).
+- `GET  /api/doctors` — List registered providers filtered by status (Admin only).
+- `POST /api/doctors/:wallet/verify` — Approve provider account (`verified` status, Admin only).
+- `PATCH /api/doctors/:wallet/status` — Update provider status (`pending`, `verified`, `suspended`, Admin only).
+
+### Consent Management
+- `GET  /api/consents/provider` — List active patients who granted consent to the calling clinician.
+- `GET  /api/consents/:patientId` — List active/revoked consents for a patient.
+- `POST /api/consents/:patientId` — Grant access consent to a verified clinician (`scope: ["records"]`).
+- `POST /api/consents/:patientId/revoke` — Revoke access consent from a clinician.
+
+### Encrypted Records
+- `POST /api/records` — Encrypt clinical JSON, pin to IPFS, and save record (Requires active consent).
+- `GET  /api/records/:patientId` — List encrypted records for a patient.
+- `GET  /api/records/:patientId/:recordId` — Fetch from IPFS, verify payload hash, decrypt and return data.
+
+### Emergency Access & Audit
+- `POST /api/emergency-access` — Trigger 15-minute emergency break-glass session with justification.
+- `GET  /api/emergency-access/critical/:accessId` — Retrieve critical medical payload (Audited on every fetch).
+- `GET  /api/emergency-access/recent/all` — List recent emergency audit events across all patients (Admin only).
+
+---
+
+## 🚦 Local Setup & Running Instructions
+
+### Prerequisites
+- Node.js >= 20.0.0
+- npm >= 10.0.0
+- Docker & Docker Compose (or local PostgreSQL)
+
+### 1. Repository Setup & Dependencies
+```bash
+git clone https://github.com/Dharaneeshsl/Golden-Hour.git
+cd Golden-Hour
+npm run install:all
+```
+
+### 2. Environment Configuration
+Copy `.env.example` to `backend/.env`:
+```bash
+cp backend/.env.example backend/.env
+```
+Generate a 256-bit symmetric encryption key:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+Update `backend/.env`:
+```env
+PORT=4000
+JWT_SECRET=your-secure-random-jwt-secret
+ENCRYPTION_KEY=your-generated-base64-encryption-key
+FRONTEND_ORIGIN=http://localhost:5173
+DATABASE_URL=postgresql://goldenhour:goldenhour-dev-only@localhost:5432/goldenhour
+ADMIN_WALLETS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+```
+
+### 3. Run Database Migrations
+Start local Postgres database and run migrations:
+```bash
+npm --prefix backend run db:migrate
+```
+
+### 4. Compile & Deploy Smart Contracts (Optional Local Node)
+```bash
+npm run compile
+npm run node
+# In a separate terminal:
+npm run deploy:local
+```
+
+### 5. Start Backend & Frontend Development Servers
+```bash
+npm run backend
+# In a separate terminal:
+npm run frontend
+```
+- **Frontend App:** `http://localhost:5173`
+- **Backend API:** `http://localhost:4000/health`
+
+---
+
+## 🐳 Docker Deployment
+
+To spin up the entire application stack (PostgreSQL, Backend API with automatic migrations, and Frontend):
+
+```bash
+docker compose up --build
+```
+
+The Compose configuration includes:
+- **`postgres`**: PostgreSQL 16 with health checks and persistent volume `postgres_data`.
+- **`backend`**: Node.js 20 service running automatic database migrations and API server.
+- **`frontend`**: Production container serving the optimized React client on port 3000.
+
+---
+
+## 🧪 Quality Assurance & Test Verification
+
+GoldenHour includes comprehensive test coverage across backend integration, smart contracts, and frontend modules:
+
+```bash
+# Run backend integration tests
+npm --prefix backend test
+
+# Run Solidity smart contract tests
+npx hardhat test
+
+# Run frontend Vitest suite
+npm --prefix frontend test
+
+# Validate full production frontend build
+npm --prefix frontend run build
+```
+
+---
+
+## 📄 License & Clinical Notice
+
+> ⚠️ **Clinical Safety Notice:** GoldenHour is an advanced architectural and engineering portfolio demonstration. It must undergo independent clinical review, legal compliance audit (HIPAA/GDPR), and formal penetration testing prior to deployment in real healthcare settings.
+````
+
+## File: backend/src/routes/doctorRoutes.js
+````javascript
+const express = require("express");
+const { requireAuth } = require("../middleware/authMiddleware");
+const { requireRole } = require("../middleware/roleCheck");
+module.exports = (c) => {
+  const r = express.Router();
+  r.post("/register", requireAuth, c.register);
+  r.get("/access", requireAuth, c.access);
+  r.get("/", requireAuth, requireRole("admin"), c.list);
+  r.post("/:wallet/verify", requireAuth, requireRole("admin"), c.verify);
+  r.patch("/:wallet/status", requireAuth, requireRole("admin"), c.updateStatus);
+  return r;
+};
+````
+
+## File: backend/src/routes/patientRoutes.js
+````javascript
+const express = require("express");
+const { requireAuth } = require("../middleware/authMiddleware");
+module.exports = (c) => {
+  const r = express.Router();
+  r.post("/", requireAuth, c.create);
+  r.get("/me", requireAuth, c.me);
+  r.get("/all", requireAuth, c.listAll);
+  r.get("/:id", requireAuth, c.get);
+  r.put("/:id", requireAuth, c.update);
+  return r;
+};
+````
+
+## File: backend/src/services/chainService.js
+````javascript
+const { ethers } = require("ethers");
+const config = require("../config/contractConfig");
+const registryAbi = [
+  "function registerPatientFor(address,bytes32,bytes32) returns (uint256)",
+  "function getPatientId(address) view returns (uint256)",
+  "function updateHashes(bytes32,bytes32)",
+  "function updateHashesFor(address,bytes32,bytes32)",
+];
+const accessAbi = [
+  "function setProviderVerified(address,bool)",
+  "function grantAccessFor(address,uint256,address,uint256)",
+  "function revokeAccessFor(address,uint256,address)",
+  "function checkAccess(uint256,address) view returns (bool)",
+];
+const recordsAbi = [
+  "function addRecordFor(uint256,address,string,string,bytes32)",
+];
+const emergencyAbi = [
+  "function triggerEmergencyAccessFor(uint256,address,string)",
+];
+const auditAbi = [
+  "function getAuditTrail(uint256) view returns (tuple(uint256 patientId,address accessor,string reason,string scope,uint64 timestamp)[])",
+];
+function hashText(value) {
+  return ethers.id(typeof value === "string" ? value : JSON.stringify(value));
+}
+class ChainService {
+  constructor(options = {}) {
+    this.config = { ...config, ...options };
+    this.enabled = Boolean(
+      this.config.rpcUrl &&
+        this.config.backendPrivateKey &&
+        this.config.registryAddress
+    );
+    if (this.enabled) {
+      this.provider = new ethers.JsonRpcProvider(this.config.rpcUrl);
+      this.signer = new ethers.Wallet(this.config.backendPrivateKey, this.provider);
+      this.registry = new ethers.Contract(this.config.registryAddress, registryAbi, this.signer);
+      this.access = this.config.accessControlAddress
+        ? new ethers.Contract(this.config.accessControlAddress, accessAbi, this.signer)
+        : null;
+      this.records = this.config.recordsAddress
+        ? new ethers.Contract(this.config.recordsAddress, recordsAbi, this.signer)
+        : null;
+      this.emergency = this.config.emergencyAddress
+        ? new ethers.Contract(this.config.emergencyAddress, emergencyAbi, this.signer)
+        : null;
+      this.audit = this.config.auditAddress
+        ? new ethers.Contract(this.config.auditAddress, auditAbi, this.provider)
+        : null;
+    }
+  }
+  async registerPatient(wallet, profile, critical) {
+    if (!this.enabled || !this.registry) return { mode: "memory", status: "chain-not-configured" };
+    const tx = await this.registry.registerPatientFor(wallet, hashText(profile), hashText(critical));
+    const receipt = await tx.wait();
+    return { mode: "chain", txHash: tx.hash, receipt, patientId: await this.patientId(wallet) };
+  }
+  async updatePatientHashes(patientWallet, profile, critical) {
+    if (!this.enabled || !this.registry) return { mode: "memory", status: "chain-not-configured" };
+    const tx = await this.registry.updateHashesFor(patientWallet, hashText(profile), hashText(critical));
+    return { mode: "chain", txHash: tx.hash, receipt: await tx.wait() };
+  }
+  async addRecord(patientId, doctor, type, cid, encryptedHash) {
+    if (!this.enabled || !this.records) return { mode: "memory", status: "chain-not-configured" };
+    const tx = await this.records.addRecordFor(patientId, doctor, type, cid, encryptedHash);
+    return { mode: "chain", txHash: tx.hash, receipt: await tx.wait() };
+  }
+  async verifyProvider(wallet, verified = true) {
+    if (!this.enabled || !this.access) return { mode: "memory", status: "chain-not-configured" };
+    const tx = await this.access.setProviderVerified(wallet, verified);
+    return { mode: "chain", txHash: tx.hash, receipt: await tx.wait() };
+  }
+  async grantAccess(patientWallet, patientId, providerWallet, expiry = 0) {
+    if (!this.enabled || !this.access) return { mode: "memory", status: "chain-not-configured" };
+    const tx = await this.access.grantAccessFor(patientWallet, patientId, providerWallet, expiry);
+    return { mode: "chain", txHash: tx.hash, receipt: await tx.wait() };
+  }
+  async revokeAccess(patientWallet, patientId, providerWallet) {
+    if (!this.enabled || !this.access) return { mode: "memory", status: "chain-not-configured" };
+    const tx = await this.access.revokeAccessFor(patientWallet, patientId, providerWallet);
+    return { mode: "chain", txHash: tx.hash, receipt: await tx.wait() };
+  }
+  async triggerEmergency(patientId, doctor, justification) {
+    if (!this.enabled || !this.emergency) return { mode: "memory", status: "chain-not-configured" };
+    const tx = await this.emergency.triggerEmergencyAccessFor(patientId, doctor, justification);
+    return { mode: "chain", txHash: tx.hash, receipt: await tx.wait() };
+  }
+  async patientId(wallet) {
+    if (!this.enabled || !this.registry) return null;
+    const id = await this.registry.getPatientId(wallet);
+    return id === 0n ? null : id.toString();
+  }
+  async auditTrail(patientId) {
+    if (!this.enabled || !this.audit) return [];
+    return this.audit.getAuditTrail(patientId);
+  }
+}
+module.exports = { ChainService, hashText };
+````
+
+## File: backend/test/app.test.js
+````javascript
+process.env.JWT_SECRET = "test-secret";
+process.env.ADMIN_WALLETS = "0x0000000000000000000000000000000000000003,0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+const os = require("os");
+const path = require("path");
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const request = require("supertest");
+const jwt = require("jsonwebtoken");
+const { createApp } = require("../src/app");
+const { JsonStore } = require("../src/config/db");
+const patientWallet = "0x0000000000000000000000000000000000000001";
+const doctorWallet = "0x0000000000000000000000000000000000000002";
+const adminWallet = "0x0000000000000000000000000000000000000003";
+const token = (wallet, role) =>
+  jwt.sign({ wallet, role }, process.env.JWT_SECRET, { issuer: "goldenhour" });
+const auth = (w) => ({
+  Authorization: `Bearer ${token(
+    w,
+    w === adminWallet ? "admin" : w === doctorWallet ? "doctor" : "patient"
+  )}`,
+});
+async function app() {
+  const store = new JsonStore(
+    path.join(os.tmpdir(), `goldenhour-${Date.now()}-${Math.random()}.json`)
+  );
+  return {
+    server: await createApp({
+      store,
+      encryption: {
+        encryptJson: (x) => ({
+          version: 1,
+          algorithm: "aes-256-gcm",
+          iv: "a",
+          tag: "b",
+          ciphertext: Buffer.from(JSON.stringify(x)).toString("base64"),
+        }),
+        decryptJson: (x) => JSON.parse(Buffer.from(x.ciphertext, "base64").toString()),
+      },
+      ipfs: {
+        uploadEncrypted: async () => ({
+          cid: `cid${Date.now()}${Math.random()}`,
+          persisted: true,
+        }),
+        fetchEncrypted: async () => ({
+          version: 1,
+          algorithm: "aes-256-gcm",
+          iv: "a",
+          tag: "b",
+          ciphertext: Buffer.from(JSON.stringify({ diagnosis: "stable" })).toString("base64"),
+        }),
+      },
+    }),
+    store,
+  };
+}
+async function setupClinical() {
+  const ctx = await app();
+  const { server } = ctx;
+  const patient = await request(server)
+    .post("/api/patients")
+    .set(auth(patientWallet))
+    .send({
+      profile: { name: "Test" },
+      critical: { bloodGroup: "O+", allergies: ["penicillin"] },
+    });
+  await request(server)
+    .post("/api/doctors/register")
+    .set(auth(doctorWallet))
+    .send({ name: "Dr Test", licenseNumber: "LIC-1", specialty: "Emergency" });
+  await request(server)
+    .post(`/api/doctors/${doctorWallet}/verify`)
+    .set(auth(adminWallet));
+  return { ...ctx, patientId: patient.body.id };
+}
+test("health is public", async () => {
+  const { server } = await app();
+  const r = await request(server).get("/health");
+  assert.equal(r.status, 200);
+  assert.equal(r.body.status, "ok");
+});
+test("patient registration and current-user resolution work", async () => {
+  const { server } = await app();
+  const r = await request(server)
+    .post("/api/patients")
+    .set(auth(patientWallet))
+    .send({ profile: { name: "Test" }, critical: { bloodGroup: "O+" } });
+  assert.equal(r.status, 201);
+  const me = await request(server)
+    .get("/api/patients/me")
+    .set(auth(patientWallet));
+  assert.equal(me.status, 200);
+  assert.equal(me.body.patientId, r.body.id);
+});
+test("provider registration and admin verification work", async () => {
+  const { server } = await app();
+  const created = await request(server)
+    .post("/api/doctors/register")
+    .set(auth(doctorWallet))
+    .send({ name: "Dr Test", licenseNumber: "LIC-1", specialty: "Emergency" });
+  assert.equal(created.status, 201);
+  const verify = await request(server)
+    .post(`/api/doctors/${doctorWallet}/verify`)
+    .set(auth(adminWallet));
+  assert.equal(verify.status, 200);
+  assert.equal(verify.body.status, "verified");
+  const list = await request(server)
+    .get("/api/doctors?status=verified")
+    .set(auth(adminWallet));
+  assert.equal(list.status, 200);
+  assert.equal(list.body.length, 1);
+});
+test("consent grant, provider enrichment and revoke work", async () => {
+  const { server, patientId } = await setupClinical();
+  const grant = await request(server)
+    .post(`/api/consents/${patientId}`)
+    .set(auth(patientWallet))
+    .send({ wallet: doctorWallet });
+  assert.equal(grant.status, 201);
+  assert.equal(grant.body.providerWallet, doctorWallet);
+  const list = await request(server)
+    .get(`/api/consents/${patientId}`)
+    .set(auth(adminWallet));
+  assert.equal(list.status, 200);
+  assert.equal(list.body[0].providerWallet, doctorWallet);
+  const revoke = await request(server)
+    .post(`/api/consents/${patientId}/revoke`)
+    .set(auth(patientWallet))
+    .send({ wallet: doctorWallet });
+  assert.equal(revoke.status, 200);
+  assert.equal(revoke.body.status, "revoked");
+});
+test("consent gates record creation and doctor can read/decrypt consented records", async () => {
+  const { server, patientId } = await setupClinical();
+  const denied = await request(server)
+    .post("/api/records")
+    .set(auth(doctorWallet))
+    .send({ patientId, recordType: "Consultation", clinicalData: { x: 1 } });
+  assert.equal(denied.status, 403);
+  await request(server)
+    .post(`/api/consents/${patientId}`)
+    .set(auth(patientWallet))
+    .send({ wallet: doctorWallet });
+  const created = await request(server)
+    .post("/api/records")
+    .set(auth(doctorWallet))
+    .send({ patientId, recordType: "Consultation", clinicalData: { diagnosis: "stable" } });
+  assert.equal(created.status, 201);
+  const list = await request(server)
+    .get(`/api/records/${patientId}`)
+    .set(auth(doctorWallet));
+  assert.equal(list.status, 200);
+  assert.equal(list.body.length, 1);
+  const detail = await request(server)
+    .get(`/api/records/${patientId}/${created.body.id}`)
+    .set(auth(doctorWallet));
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.clinicalData.diagnosis, "stable");
+});
+test("emergency access is time-bounded and admin can audit", async () => {
+  const { server, store, patientId } = await setupClinical();
+  const emergency = await request(server)
+    .post("/api/emergency-access")
+    .set(auth(doctorWallet))
+    .send({
+      patientId,
+      justification: "Immediate trauma assessment requires critical history",
+    });
+  assert.equal(emergency.status, 200);
+  assert.ok(emergency.body.expiresAt);
+  const critical = await request(server)
+    .get(`/api/emergency-access/critical/${emergency.body.accessId}`)
+    .set(auth(doctorWallet));
+  assert.equal(critical.status, 200);
+  const audit = await request(server)
+    .get(`/api/emergency-access/${patientId}`)
+    .set(auth(adminWallet));
+  assert.equal(audit.status, 200);
+  const event = await store.auditById(emergency.body.accessId);
+  event.expiresAt = new Date(Date.now() - 1000).toISOString();
+  await store.save(event);
+  const expired = await request(server)
+    .get(`/api/emergency-access/critical/${emergency.body.accessId}`)
+    .set(auth(doctorWallet));
+  assert.equal(expired.status, 410);
+});
+test("admin patient oversight bypass works while ordinary users remain isolated", async () => {
+  const { server, patientId } = await setupClinical();
+  const other = await request(server)
+    .get(`/api/patients/${patientId}`)
+    .set(auth(doctorWallet));
+  assert.equal(other.status, 403);
+  const admin = await request(server)
+    .get(`/api/patients/${patientId}`)
+    .set(auth(adminWallet));
+  assert.equal(admin.status, 200);
+});
+test("protected routes reject missing auth", async () => {
+  const { server } = await app();
+  assert.equal((await request(server).post("/api/records").send({})).status, 401);
+});
+````
+
+## File: docker-compose.yml
+````yaml
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: goldenhour
+      POSTGRES_PASSWORD: goldenhour
+      POSTGRES_DB: goldenhour
+    ports:
+      - "5432:5432"
+    volumes:
+      - goldenhour_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U goldenhour"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      FRONTEND_ORIGIN: http://localhost:3000,http://localhost:5173
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-in-production-please}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      DATABASE_URL: postgresql://goldenhour:goldenhour@postgres:5432/goldenhour
+      DB_SSL: "false"
+      ADMIN_WALLETS: ${ADMIN_WALLETS:-0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266,0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c}
+      ALLOW_DEMO_LOGIN: "true"
+      RPC_URL: ${RPC_URL:-}
+      BACKEND_PRIVATE_KEY: ${BACKEND_PRIVATE_KEY:-}
+      REGISTRY_ADDRESS: ${REGISTRY_ADDRESS:-}
+      ACCESS_CONTROL_ADDRESS: ${ACCESS_CONTROL_ADDRESS:-}
+      RECORDS_ADDRESS: ${RECORDS_ADDRESS:-}
+      AUDIT_ADDRESS: ${AUDIT_ADDRESS:-}
+      EMERGENCY_ADDRESS: ${EMERGENCY_ADDRESS:-}
+      PINATA_JWT: ${PINATA_JWT:-}
+    ports:
+      - "4000:4000"
+    command: >
+      sh -c "node src/config/migrate.js && node src/app.js"
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: http://localhost:4000
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+volumes:
+  goldenhour_pg_data:
+````
+
+## File: backend/src/routes/emergencyRoutes.js
+````javascript
+const express = require("express");
+const { requireAuth } = require("../middleware/authMiddleware");
+const { requireVerifiedProvider } = require("../middleware/roleCheck");
+module.exports = (c, store) => {
+  const r = express.Router();
+  r.post("/", requireAuth, requireVerifiedProvider(store), c.create);
+  r.get("/critical/:accessId", requireAuth, c.critical);
+  r.get("/recent/all", requireAuth, c.recentAudits);
+  r.get("/:patientId", requireAuth, c.audit);
+  return r;
+};
+````
+
+## File: backend/src/services/ipfsService.js
+````javascript
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
+function getDevDirs() {
+  const dirs = [
+    path.join(process.cwd(), ".data", "ipfs-mock"),
+    path.join(__dirname, "../../../.data", "ipfs-mock"),
+    path.join(__dirname, "../../.data", "ipfs-mock"),
+  ];
+  return [...new Set(dirs)];
+}
+const devModeAllowed = () =>
+  process.env.NODE_ENV !== "production" || process.env.ALLOW_LOCAL_IPFS_MOCK === "true";
+async function uploadEncrypted(payload) {
+  if (!process.env.PINATA_JWT) {
+    if (!devModeAllowed()) {
+      throw new Error("PINATA_JWT must be configured; refusing to generate a fake CID");
+    }
+    const cid = `dev${crypto.randomBytes(16).toString("hex")}`;
+    const serialized = JSON.stringify(payload);
+    for (const d of getDevDirs()) {
+      try {
+        fs.mkdirSync(d, { recursive: true });
+        fs.writeFileSync(path.join(d, `${cid}.json`), serialized);
+      } catch (_) {}
+    }
+    return { cid, persisted: true, mode: "local-dev-mock" };
+  }
+  const response = await fetch("https://api.pinata.cloud/pinning/pinJSONToIPFS", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.PINATA_JWT}`,
+    },
+    body: JSON.stringify({ pinataContent: payload }),
+  });
+  if (!response.ok) throw new Error(`IPFS upload failed: ${response.status}`);
+  const data = await response.json();
+  if (!data.IpfsHash) throw new Error("IPFS response did not contain a CID");
+  return { cid: data.IpfsHash, persisted: true };
+}
+async function fetchEncrypted(cid) {
+  if (!cid || cid.length > 128 || !/^[A-Za-z0-9_-]+$/.test(cid)) {
+    throw new Error("Invalid IPFS CID string format");
+  }
+  for (const d of getDevDirs()) {
+    const filePath = path.join(d, `${cid}.json`);
+    if (fs.existsSync(filePath)) {
+      if (!devModeAllowed()) {
+        throw new Error("Local dev IPFS mock CIDs are invalid in production");
+      }
+      return JSON.parse(fs.readFileSync(filePath, "utf8"));
+    }
+  }
+  if (cid.startsWith("dev")) {
+    if (!devModeAllowed()) {
+      throw new Error("Local dev IPFS mock CIDs are invalid in production");
+    }
+    throw new Error("Local dev IPFS mock payload not found");
+  }
+  const response = await fetch(`https://gateway.pinata.cloud/ipfs/${encodeURIComponent(cid)}`);
+  if (!response.ok) throw new Error(`IPFS fetch failed: ${response.status}`);
+  return response.json();
+}
+module.exports = { uploadEncrypted, fetchEncrypted };
+````
+
+## File: frontend/src/components/DoctorDashboard.jsx
+````javascript
+import { useEffect, useState } from "react";
+import { api } from "../api";
+import { REASON_CODES } from "../config/i18n";
+export default function DoctorDashboard({ wallet }) {
+  const [patientId, setPatientId] = useState("");
+  const [reasonCode, setReasonCode] = useState(REASON_CODES[0]?.code || "TRAUMA_UNRESPONSIVE");
+  const [facility, setFacility] = useState("");
+  const [justification, setJustification] = useState(
+    ""
+  );
+  const [provider, setProvider] = useState(null);
+  const [activeConsents, setActiveConsents] = useState([]);
+  const [name, setName] = useState("");
+  const [licenseNumber, setLicenseNumber] = useState("");
+  const [specialty, setSpecialty] = useState("");
+  const [recordType, setRecordType] = useState("Consultation");
+  const [clinicalData, setClinicalData] = useState('{\n  "summary": "Routine consultation",\n  "notes": "Patient stable"\n}');
+  const [records, setRecords] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api
+      .providerAccess()
+      .then((data) => {
+        setProvider(data);
+        if (data.status === "verified") {
+          api.providerConsents().then(setActiveConsents).catch(console.error);
+        }
+      })
+      .catch((err) => {
+        if (err.status === 403) {
+          setProvider(false);
+        } else {
+          setError(err.message || "Failed to load provider profile");
+        }
+      });
+  }, []);
+  const register = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api.registerProvider({ name, licenseNumber, specialty });
+      setProvider({ provider: result, status: result.status });
+      setNotice("Provider registration submitted. An administrator must verify it.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const loadRecordsFor = async (idToLoad) => {
+    const target = idToLoad || patientId;
+    if (!target) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      setRecords(await api.records(target));
+      setSelected(null);
+      setError("");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const viewRecord = async (id) => {
+    setBusy(true);
+    try {
+      setSelected(await api.recordDetail(patientId, id));
+      setError("");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const addRecord = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const data = JSON.parse(clinicalData);
+      await api.addRecord({ patientId, recordType, clinicalData: data });
+      setNotice("Encrypted record created successfully.");
+      await loadRecordsFor();
+    } catch (e) {
+      setError(e instanceof SyntaxError ? "Clinical data must be valid JSON" : e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const handleEmergency = async () => {
+    if (!patientId) {
+      setError("Please select or enter a Patient ID for emergency access.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api.emergency({ patientId, justification, reasonCode, facility });
+      const critical = await api.emergencyCritical(result.accessId);
+      setNotice(`Emergency access valid until ${new Date(critical.expiresAt).toLocaleTimeString()}.`);
+      setSelected({
+        clinicalData: { critical: critical.critical },
+        recordType: "Emergency Critical Context",
+      });
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (provider === false) {
+    return (
+      <section className="dashboard">
+        <form className="panel form-panel" onSubmit={register}>
+          <p className="eyebrow">Provider Onboarding</p>
+          <h2>Register as a Healthcare Provider</h2>
+          <p className="muted" style={{ fontFamily: "monospace", fontSize: "0.85rem" }}>
+            Wallet: {wallet}
+          </p>
+          <label>
+            Full Name
+            <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Dr. Jane Doe" />
+          </label>
+          <label>
+            Medical License Number
+            <input required value={licenseNumber} onChange={(e) => setLicenseNumber(e.target.value)} placeholder="MD-123456" />
+          </label>
+          <label>
+            Medical Specialty
+            <input required value={specialty} onChange={(e) => setSpecialty(e.target.value)} placeholder="Cardiology" />
+          </label>
+          <button className="primary full" disabled={busy}>
+            {busy ? "Submitting…" : "Submit Registration for Admin Approval"}
+          </button>
+          {error && <p className="error">{error}</p>}
+        </form>
+      </section>
+    );
+  }
+  return (
+    <section className="dashboard">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Clinician Portal</p>
+          <h2>Care Team Workspace</h2>
+        </div>
+        <span className="verified">● {provider?.status || "Pending"} Provider</span>
+      </div>
+      {provider?.status === "suspended" && (
+        <div className="panel error-box">
+          <h3>Account Suspended</h3>
+          <p>Your provider account has been suspended by an administrator. Clinical actions and record access are disabled.</p>
+        </div>
+      )}
+      {provider?.status === "pending" && (
+        <div className="panel">
+          <p className="muted">Your provider registration is awaiting administrator verification. Clinical actions remain locked.</p>
+        </div>
+      )}
+      {provider?.status === "verified" && (
+        <div className="doctor-grid">
+          <div className="panel search-panel">
+            <h3>Consented Patients</h3>
+            {activeConsents.length > 0 && (
+              <div style={{ marginBottom: "1rem" }}>
+                {activeConsents.map((c) => (
+                  <button
+                    key={c.id}
+                    className="secondary full"
+                    style={{ marginBottom: "0.5rem", textAlign: "left" }}
+                    onClick={() => {
+                      setPatientId(c.patientId);
+                      loadRecordsFor(c.patientId);
+                    }}
+                  >
+                    Patient {c.patientId.slice(0, 8)}... ({c.patientWallet?.slice(0, 8)}...)
+                  </button>
+                ))}
+              </div>
+            )}
+            <h3>Search Patient Records</h3>
+            <input
+              value={patientId}
+              onChange={(e) => setPatientId(e.target.value)}
+              placeholder="Enter Patient ID"
+            />
+            <button className="secondary full" onClick={() => loadRecordsFor()} disabled={busy}>
+              {busy ? "Loading..." : "Load Consented Records"}
+            </button>
+            {records.map((r) => (
+              <div className="data-row" key={r.id}>
+                <span>
+                  <b>{r.recordType}</b>
+                  <small>{new Date(r.createdAt).toLocaleString()}</small>
+                </span>
+                <button className="text-button" onClick={() => viewRecord(r.id)} disabled={busy}>
+                  View
+                </button>
+              </div>
+            ))}
+            {selected && (
+              <div className="record-detail" style={{ marginTop: "1rem", padding: "1rem", background: "rgba(255,255,255,0.05)", borderRadius: "8px" }}>
+                <h4>{selected.recordType}</h4>
+                <pre>{JSON.stringify(selected.clinicalData, null, 2)}</pre>
+              </div>
+            )}
+          </div>
+          <div className="panel">
+            <h3>Add Encrypted Record</h3>
+            <form onSubmit={addRecord}>
+              <label>
+                Record Type
+                <input required value={recordType} onChange={(e) => setRecordType(e.target.value)} />
+              </label>
+              <label>
+                Clinical Data (JSON)
+                <textarea
+                  value={clinicalData}
+                  onChange={(e) => setClinicalData(e.target.value)}
+                  rows="7"
+                  required
+                />
+              </label>
+              <button className="primary full" disabled={busy}>
+                {busy ? "Encrypting & saving..." : "Encrypt & Save Record"}
+              </button>
+            </form>
+            <h3 className="subheading" style={{ marginTop: "2rem" }}>Break-Glass Emergency Access (v2)</h3>
+            <label>
+              Clinical Reason Code
+              <select value={reasonCode} onChange={(e) => setReasonCode(e.target.value)} style={{ marginBottom: "0.5rem" }}>
+                {REASON_CODES.map((r) => (
+                  <option key={r.code} value={r.code}>{r.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Facility / Hospital
+              <input value={facility} onChange={(e) => setFacility(e.target.value)} placeholder="Hospital name" style={{ marginBottom: "0.5rem" }} />
+            </label>
+            <textarea
+              value={justification}
+              onChange={(e) => setJustification(e.target.value)}
+              rows="3"
+              placeholder="Clinical justification..."
+            />
+            <button className="primary full" onClick={handleEmergency} disabled={busy}>
+              Request Emergency Access
+            </button>
+            {notice && <p className="success">{notice}</p>}
+            {error && <p className="error">{error}</p>}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+````
+
+## File: frontend/src/components/EmergencyScanView.jsx
+````javascript
+import { useState } from "react";
+import { api, getToken } from "../api";
+import { REASON_CODES } from "../config/i18n";
+export default function EmergencyScanView({ initialPatientId = "" }) {
+  const [patientId, setPatientId] = useState(initialPatientId);
+  const [reasonCode, setReasonCode] = useState(REASON_CODES[0]?.code || "TRAUMA_UNRESPONSIVE");
+  const [facility, setFacility] = useState("");
+  const [justification, setJustification] = useState(
+    ""
+  );
+  const [accessGrant, setAccessGrant] = useState(null);
+  const [criticalData, setCriticalData] = useState(null);
+  const [expired, setExpired] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const token = getToken();
+  const resetSession = () => {
+    setAccessGrant(null);
+    setCriticalData(null);
+    setExpired(false);
+    setError("");
+  };
+  const submitBreakGlass = async () => {
+    if (!token) {
+      setError("Clinician authentication required. Please connect your verified provider wallet.");
+      return;
+    }
+    if (!patientId.trim()) {
+      setError("Please enter a valid Patient ID.");
+      return;
+    }
+    if (justification.trim().length < 10) {
+      setError("Please provide a detailed clinical justification (minimum 10 characters).");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setExpired(false);
+    try {
+      const access = await api.emergency({ patientId: patientId.trim(), justification, reasonCode, facility });
+      setAccessGrant(access);
+    } catch (err) {
+      setError(err.message || "Failed to trigger emergency break-glass access");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const revealCriticalData = async () => {
+    if (!accessGrant) return;
+    setBusy(true);
+    setError("");
+    try {
+      const data = await api.emergencyCritical(accessGrant.accessId);
+      setCriticalData(data);
+    } catch (err) {
+      if (err.status === 410) {
+        setExpired(true);
+        setError("Emergency access session has expired (15-minute TTL elapsed).");
+      } else {
+        setError(err.message || "Failed to retrieve critical emergency data");
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="dashboard">
+      <div className="emergency-banner">
+        <span className="warning">!</span>
+        <div>
+          <b>Break-Glass Emergency Access</b>
+          <p>
+            Logged clinical access for life-threatening emergencies. Every break-glass trigger is
+            recorded in the patient's immutable audit log. Access window automatically expires after 15 minutes.
+          </p>
+        </div>
+      </div>
+      {!token && (
+        <div className="panel error-box">
+          <h3>Authentication Required</h3>
+          <p>You must connect a verified clinician wallet to request emergency access.</p>
+        </div>
+      )}
+      <div className="panel">
+        <h3>Emergency Patient Lookup</h3>
+        <label>Patient ID</label>
+        <input
+          value={patientId}
+          onChange={(e) => setPatientId(e.target.value)}
+          placeholder="e.g. uuid-patient-id"
+        />
+        <label>Clinical Reason Code</label>
+        <select value={reasonCode} onChange={(e) => setReasonCode(e.target.value)} style={{ marginBottom: "0.75rem", width: "100%", padding: "0.5rem" }}>
+          {REASON_CODES.map((r) => (
+            <option key={r.code} value={r.code}>{r.label}</option>
+          ))}
+        </select>
+        <label>Facility / Hospital</label>
+        <input
+          value={facility}
+          onChange={(e) => setFacility(e.target.value)}
+          placeholder="e.g. Trauma Care Center"
+          style={{ marginBottom: "0.75rem" }}
+        />
+        <label>Clinical Justification</label>
+        <textarea
+          value={justification}
+          onChange={(e) => setJustification(e.target.value)}
+          rows="4"
+          placeholder="Detailed emergency justification for auditing..."
+        />
+        <button
+          className="primary"
+          onClick={submitBreakGlass}
+          disabled={busy || !token}
+        >
+          {busy ? "Verifying access…" : "Trigger Logged Emergency Access"}
+        </button>
+        {error && <p className="error" style={{ color: "#ef4444", marginTop: "1rem" }}>{error}</p>}
+        {expired && (
+          <div style={{ marginTop: "1rem" }}>
+            <button className="secondary" onClick={resetSession}>
+              🔄 Request New Emergency Access Session
+            </button>
+          </div>
+        )}
+        {accessGrant && !criticalData && !expired && (
+          <div style={{ marginTop: "1.5rem", padding: "1rem", background: "rgba(16,185,129,0.1)", borderRadius: "8px" }}>
+            <p className="success">
+              Emergency break-glass session created! Valid until{" "}
+              {new Date(accessGrant.expiresAt).toLocaleTimeString()}.
+            </p>
+            <button className="primary" onClick={revealCriticalData} disabled={busy}>
+              {busy ? "Loading critical payload..." : "View Critical Patient Data →"}
+            </button>
+          </div>
+        )}
+        {criticalData && (
+          <div style={{ marginTop: "1.5rem" }}>
+            <p className="success">
+              Critical medical context retrieved. Access expires at{" "}
+              {new Date(criticalData.expiresAt).toLocaleTimeString()}.
+            </p>
+            <div className="critical-grid">
+              <div>
+                <span>Blood Group</span>
+                <strong>{criticalData.critical?.bloodGroup || "Not provided"}</strong>
+              </div>
+              <div>
+                <span>Allergies</span>
+                <strong>{(criticalData.critical?.allergies || []).join(", ") || "None"}</strong>
+              </div>
+              <div>
+                <span>Known Conditions</span>
+                <strong>{(criticalData.critical?.conditions || []).join(", ") || "None"}</strong>
+              </div>
+              <div>
+                <span>Current Medications</span>
+                <strong>{(criticalData.critical?.medications || []).join(", ") || "None"}</strong>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+````
+
+## File: frontend/src/components/WalletConnectButton.jsx
+````javascript
+import { useState, useEffect } from "react";
+import { useContract } from "../hooks/useContract";
+import { shortenAddress } from "../utils/web3";
+import { fullLogoutCleanup, isWalletDisconnected, markWalletConnected } from "../utils/session";
+export default function WalletConnectButton({ onConnected }) {
+  const [address, setAddress] = useState("");
+  const [error, setError] = useState("");
+  const { connect } = useContract();
+  useEffect(() => {
+    if (isWalletDisconnected()) return;
+    if (window.ethereum) {
+      window.ethereum.request({ method: "eth_accounts" }).then((accounts) => {
+        if (accounts && accounts[0]) {
+          setAddress(accounts[0]);
+          onConnected?.(accounts[0]);
+        }
+      }).catch(console.error);
+      const handleAccountsChanged = (accounts) => {
+        if (accounts && accounts.length > 0) {
+          setAddress(accounts[0]);
+          onConnected?.(accounts[0]);
+        } else {
+          setAddress("");
+          onConnected?.("");
+        }
+      };
+      window.ethereum.on("accountsChanged", handleAccountsChanged);
+      return () => {
+        if (window.ethereum.removeListener) {
+          window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
+        }
+      };
+    }
+  }, []);
+  const handle = async () => {
+    setError("");
+    try {
+      const wallet = await connect();
+      markWalletConnected();
+      setAddress(wallet.address);
+      onConnected?.(wallet.address);
+    } catch (err) {
+      if (
+        err.code === "ACTION_REJECTED" ||
+        err.code === 4001 ||
+        (err.message && err.message.includes("rejected")) ||
+        (err.message && err.message.includes("denied"))
+      ) {
+        setError("Wallet connection request was cancelled");
+      } else if (!window.ethereum) {
+        setError("MetaMask browser extension not detected");
+      } else {
+        setError(err.message || "Failed to connect wallet");
+      }
+    }
+  };
+  const disconnect = (e) => {
+    e.stopPropagation();
+    setAddress("");
+    onConnected?.("");
+    void fullLogoutCleanup().finally(() => {
+      window.dispatchEvent(new Event("goldenhour_session_expired"));
+    });
+  };
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <button className="wallet" onClick={handle}>
+          {address ? `Connected: ${shortenAddress(address)}` : "Connect MetaMask Wallet"}
+        </button>
+        {address && (
+          <button
+            type="button"
+            className="secondary"
+            style={{ fontSize: "0.75rem", padding: "8px 12px" }}
+            onClick={disconnect}
+          >
+            Disconnect
+          </button>
+        )}
+      </div>
+      {error && <small className="error" style={{ color: "#ef4444", display: "block", marginTop: "0.5rem" }}>{error}</small>}
+    </div>
+  );
+}
+````
+
+## File: backend/src/controllers/doctorController.js
+````javascript
+const crypto = require("crypto");
+const { canonicalizeWallet } = require("../config/db");
+function createDoctorController({ store, chain }) {
+  return {
+    register: async (req, res) => {
+      const wallet = canonicalizeWallet(req.user.wallet);
+      const { name, licenseNumber, specialty } = req.body || {};
+      if (!name || !licenseNumber || !specialty) {
+        return res
+          .status(400)
+          .json({ error: "name, licenseNumber and specialty are required" });
+      }
+      const existing = await store.providerByWallet(wallet);
+      if (existing) {
+        return res
+          .status(409)
+          .json({ error: "Provider already registered", provider: existing });
+      }
+      const provider = await store.addProvider({
+        id: crypto.randomUUID(),
+        wallet,
+        name: name.trim(),
+        licenseNumber: licenseNumber.trim(),
+        specialty: specialty.trim(),
+        status: "pending",
+        createdAt: new Date().toISOString(),
+      });
+      await store.addAudit({
+        id: crypto.randomUUID(),
+        actor: wallet,
+        action: "PROVIDER_REGISTERED",
+        providerId: provider.id,
+        timestamp: new Date().toISOString(),
+      });
+      res.status(201).json(provider);
+    },
+    access: async (req, res) => {
+      const wallet = canonicalizeWallet(req.user.wallet);
+      const provider = await store.providerByWallet(wallet);
+      if (!provider) {
+        return res.status(403).json({ error: "Provider registration required" });
+      }
+      res.json({
+        provider,
+        status: provider.status,
+        permissions:
+          provider.status === "verified"
+            ? ["read", "write", "emergency-critical-only"]
+            : [],
+      });
+    },
+    verify: async (req, res) => {
+      const targetWallet = canonicalizeWallet(req.params.wallet);
+      const provider = await store.updateProvider(targetWallet, {
+        status: "verified",
+        verifiedBy: canonicalizeWallet(req.user.wallet),
+        verifiedAt: new Date().toISOString(),
+      });
+      if (!provider) return res.status(404).json({ error: "Provider not found" });
+      try {
+        if (chain.enabled) {
+          await chain.verifyProvider(provider.wallet, true);
+        }
+        await store.addAudit({
+          id: crypto.randomUUID(),
+          actor: canonicalizeWallet(req.user.wallet),
+          action: "PROVIDER_VERIFIED",
+          providerId: provider.id,
+          timestamp: new Date().toISOString(),
+        });
+        res.json(provider);
+      } catch (e) {
+        console.error("Provider chain verification error:", e);
+        await store.updateProvider(provider.wallet, {
+          status: "pending",
+          verifiedBy: null,
+          verifiedAt: null,
+        });
+        res.status(502).json({ error: "Provider verification failed on chain" });
+      }
+    },
+    updateStatus: async (req, res) => {
+      const targetWallet = canonicalizeWallet(req.params.wallet);
+      const { status } = req.body || {};
+      const allowed = ["pending", "verified", "suspended"];
+      if (!allowed.includes(status)) {
+        return res.status(400).json({ error: `status must be one of: ${allowed.join(", ")}` });
+      }
+      const existing = await store.providerByWallet(targetWallet);
+      if (!existing) return res.status(404).json({ error: "Provider not found" });
+      const updated = await store.updateProvider(targetWallet, {
+        status,
+        verifiedBy: status === "verified" ? canonicalizeWallet(req.user.wallet) : (existing.verifiedBy || existing.verified_by || null),
+        verifiedAt: status === "verified" ? new Date().toISOString() : (existing.verifiedAt || existing.verified_at || null),
+      });
+      if (chain.enabled) {
+        try {
+          await chain.verifyProvider(targetWallet, status === "verified");
+        } catch (e) {
+          console.error("Chain provider status sync failed, rolling back:", e);
+          await store.updateProvider(targetWallet, {
+            status: existing.status,
+            verifiedBy: existing.verifiedBy || existing.verified_by,
+            verifiedAt: existing.verifiedAt || existing.verified_at,
+          });
+          return res.status(502).json({ error: "Provider status change failed on chain" });
+        }
+      }
+      await store.addAudit({
+        id: crypto.randomUUID(),
+        actor: canonicalizeWallet(req.user.wallet),
+        action: `PROVIDER_STATUS_CHANGED_${status.toUpperCase()}`,
+        providerId: existing.id,
+        metadata: { previousStatus: existing.status, newStatus: status },
+        timestamp: new Date().toISOString(),
+      });
+      res.json(updated);
+    },
+    list: async (req, res) => {
+      res.json(await store.providers(req.query.status));
+    },
+  };
+}
+module.exports = { createDoctorController };
+````
+
+## File: backend/src/controllers/emergencyController.js
+````javascript
+const crypto = require("crypto");
+const { notificationService } = require("../services/notificationService");
+const { canonicalizeWallet } = require("../config/db");
+function createEmergencyController({ store, chain }) {
+  const canAudit = (req, patient) =>
+    req.user.role === "admin" ||
+    canonicalizeWallet(patient.wallet) === canonicalizeWallet(req.user.wallet);
+  return {
+    create: async (req, res) => {
+      const { patientId, justification } = req.body || {};
+      const patient = await store.patientById(patientId);
+      if (!patient) return res.status(404).json({ error: "Patient not found" });
+      if (!justification || justification.trim().length < 10) {
+        return res
+          .status(400)
+          .json({ error: "A detailed justification of at least 10 characters is required" });
+      }
+      if (req.provider && req.provider.status !== "verified") {
+        return res.status(403).json({ error: "Provider account is not active or verified" });
+      }
+      try {
+        let chainPatientId = chain.enabled ? await chain.patientId(patient.wallet) : null;
+        if (chain.enabled && !chainPatientId) {
+          throw new Error("Patient is not registered on chain");
+        }
+        if (chain.enabled) {
+          await chain.triggerEmergency(
+            chainPatientId,
+            req.provider.wallet,
+            justification.trim()
+          );
+        }
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+        const event = await store.addAudit({
+          id: crypto.randomUUID(),
+          patientId,
+          actor: canonicalizeWallet(req.provider.wallet),
+          action: "EMERGENCY_BREAK_GLASS",
+          providerId: req.provider.id,
+          metadata: { scope: "CRITICAL_ONLY", justification: justification.trim(), reasonCode: req.body.reasonCode || "TRAUMA_EMERGENCY", facility: req.body.facility || "EMERGENCY_DEPARTMENT" },
+          expiresAt,
+          timestamp: new Date().toISOString(),
+        });
+        // Dispatch instant SMS/Push notification alerts (Phase 2 & 5)
+        notificationService.sendEmergencyAlert({
+          patientId,
+          patientPhone: patient.profile && patient.profile.phone,
+          emergencyContact: patient.critical && patient.critical.emergencyContact,
+          doctorName: req.provider && req.provider.name,
+          facility: req.body.facility || "Emergency Department",
+          reasonCode: req.body.reasonCode || "TRAUMA_EMERGENCY",
+        }).catch((err) => console.error("Notification warning:", err.message));
+        // Expose access token metadata without revealing un-audited critical data
+        res.json({
+          accessId: event.id,
+          patientId,
+          expiresAt,
+          audit: event,
+        });
+      } catch (e) {
+        console.error("Emergency create error:", e);
+        res.status(502).json({ error: "Emergency access trigger failed" });
+      }
+    },
+    critical: async (req, res) => {
+      try {
+        const event = await store.auditById(req.params.accessId);
+        if (!event || event.action !== "EMERGENCY_BREAK_GLASS") {
+          return res.status(404).json({ error: "Emergency access event not found" });
+        }
+        const expiresAtTime = new Date(event.expiresAt).getTime();
+        if (isNaN(expiresAtTime) || expiresAtTime <= Date.now()) {
+          return res.status(410).json({ error: "Emergency access window has expired" });
+        }
+        const patient = await store.patientById(event.patientId);
+        if (!patient) return res.status(404).json({ error: "Patient not found" });
+        const requestorWallet = canonicalizeWallet(req.user.wallet);
+        const eventActorWallet = canonicalizeWallet(event.actor);
+        if (req.user.role !== "admin" && eventActorWallet !== requestorWallet) {
+          return res.status(403).json({ error: "Emergency access denied" });
+        }
+        let provider = null;
+        if (req.user.role !== "admin") {
+          provider = await store.providerByWallet(requestorWallet);
+          if (!provider || provider.status !== "verified") {
+            return res.status(403).json({ error: "Provider status is no longer verified or active" });
+          }
+        }
+        // Log every view of the critical medical payload with proper providerId
+        await store.addAudit({
+          id: crypto.randomUUID(),
+          patientId: patient.id,
+          actor: requestorWallet,
+          action: "EMERGENCY_CRITICAL_VIEW",
+          providerId: provider ? provider.id : null,
+          metadata: { accessId: req.params.accessId },
+          timestamp: new Date().toISOString(),
+        });
+        res.json({
+          patientId: patient.id,
+          critical: patient.critical,
+          expiresAt: event.expiresAt,
+        });
+      } catch (e) {
+        console.error("Emergency critical retrieval error:", e);
+        res.status(500).json({ error: "Failed to retrieve critical emergency payload" });
+      }
+    },
+    audit: async (req, res) => {
+      const patient = await store.patientById(req.params.patientId);
+      if (!patient) return res.status(404).json({ error: "Patient not found" });
+      if (!canAudit(req, patient)) {
+        return res.status(403).json({ error: "Audit access denied" });
+      }
+      res.json(await store.auditForPatient(patient.id));
+    },
+    recentAudits: async (req, res) => {
+      if (req.user.role !== "admin") {
+        return res.status(403).json({ error: "Admin authorization required" });
+      }
+      res.json(await store.recentAudits(100));
+    },
+  };
+}
+module.exports = { createEmergencyController };
+````
+
+## File: backend/src/controllers/patientController.js
+````javascript
+const crypto = require("crypto");
+const { canonicalizeWallet } = require("../config/db");
+function validObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
+}
+function createPatientController({ store, chain }) {
+  const owned = async (req, res, id) => {
+    const patient = await store.patientById(id);
+    if (!patient) {
+      res.status(404).json({ error: "Patient not found" });
+      return null;
+    }
+    if (
+      req.user.role !== "admin" &&
+      canonicalizeWallet(patient.wallet) !== canonicalizeWallet(req.user.wallet)
+    ) {
+      res.status(403).json({ error: "Patient data access denied" });
+      return null;
+    }
+    return patient;
+  };
+  return {
+    create: async (req, res) => {
+      const wallet = canonicalizeWallet(req.user.wallet);
+      const { profile, critical } = req.body || {};
+      if (!validObject(profile) || !validObject(critical)) {
+        return res.status(400).json({ error: "profile and critical must be valid objects" });
+      }
+      if (await store.patientByWallet(wallet)) {
+        return res.status(409).json({ error: "Patient already registered" });
+      }
+      try {
+        let chainPatientId = chain.enabled ? await chain.patientId(wallet) : null;
+        if (chain.enabled && !chainPatientId) {
+          const onChain = await chain.registerPatient(wallet, profile, critical);
+          chainPatientId = onChain.patientId;
+        }
+        const patient = await store.addPatient({
+          id: crypto.randomUUID(),
+          wallet,
+          profile,
+          critical,
+          createdAt: new Date().toISOString(),
+        });
+        await store.addAudit({
+          id: crypto.randomUUID(),
+          patientId: patient.id,
+          actor: wallet,
+          action: "PATIENT_REGISTERED",
+          metadata: { chainPatientId },
+          timestamp: new Date().toISOString(),
+        });
+        res.status(201).json({ ...patient, chainPatientId });
+      } catch (e) {
+        console.error("Patient creation error:", e);
+        res.status(502).json({ error: "Patient registration failed" });
+      }
+    },
+    update: async (req, res) => {
+      const patient = await owned(req, res, req.params.id);
+      if (!patient) return;
+      const { profile, critical } = req.body || {};
+      if (profile && !validObject(profile)) {
+        return res.status(400).json({ error: "profile must be an object" });
+      }
+      if (critical && !validObject(critical)) {
+        return res.status(400).json({ error: "critical must be an object" });
+      }
+      try {
+        const updated = await store.updatePatient(patient.id, { profile, critical });
+        if (chain.enabled) {
+          await chain.updatePatientHashes(patient.wallet, updated.profile, updated.critical);
+        }
+        await store.addAudit({
+          id: crypto.randomUUID(),
+          patientId: patient.id,
+          actor: canonicalizeWallet(req.user.wallet),
+          action: "PATIENT_PROFILE_UPDATED",
+          metadata: { updatedFields: Object.keys(req.body || {}) },
+          timestamp: new Date().toISOString(),
+        });
+        res.json(updated);
+      } catch (e) {
+        console.error("Patient update error:", e);
+        res.status(500).json({ error: "Failed to update patient profile" });
+      }
+    },
+    get: async (req, res) => {
+      const patient = await owned(req, res, req.params.id);
+      if (!patient) return;
+      res.json({
+        ...patient,
+        records: await store.recordsForPatient(patient.id),
+        audit: await store.auditForPatient(patient.id),
+      });
+    },
+    listAll: async (req, res) => {
+      if (req.user.role !== "admin") {
+        return res.status(403).json({ error: "Admin authorization required" });
+      }
+      const patients = await store.allPatients();
+      res.json(patients);
+    },
+    me: async (req, res) => {
+      const wallet = canonicalizeWallet(req.user.wallet);
+      const patient = await store.patientByWallet(wallet);
+      if (!patient) {
+        return res.status(404).json({
+          error: "Patient not registered",
+          code: "PATIENT_NOT_REGISTERED",
+        });
+      }
+      res.json({ patientId: patient.id, patient });
+    },
+  };
+}
+module.exports = { createPatientController };
+````
+
+## File: backend/.env.example
+````
+PORT=4000
+FRONTEND_ORIGIN=http://localhost:5173
+JWT_SECRET=replace-with-a-long-random-secret
+# Neon example: postgresql://user:password@host/dbname?sslmode=require&channel_binding=require
+DATABASE_URL=postgresql://goldenhour:goldenhour@localhost:5432/goldenhour
+DB_SSL=false
+DB_POOL_SIZE=10
+ENCRYPTION_KEY=base64-encoded-32-byte-key
+PINATA_JWT=replace-with-pinata-jwt
+ADMIN_WALLETS=comma-separated-admin-wallet-addresses
+RPC_URL=http://127.0.0.1:8545
+BACKEND_PRIVATE_KEY=
+REGISTRY_ADDRESS=
+ACCESS_CONTROL_ADDRESS=
+RECORDS_ADDRESS=
+AUDIT_ADDRESS=
+EMERGENCY_ADDRESS=
+ALLOW_DEMO_LOGIN=true
+````
+
+## File: backend/src/controllers/recordController.js
+````javascript
+const crypto = require("crypto");
+const { canonicalizeWallet } = require("../config/db");
+function canonicalJsonStringify(obj) {
+  if (obj === null || typeof obj !== "object") {
+    return JSON.stringify(obj);
+  }
+  if (Array.isArray(obj)) {
+    return "[" + obj.map(canonicalJsonStringify).join(",") + "]";
+  }
+  const keys = Object.keys(obj).sort();
+  return (
+    "{" +
+    keys
+      .map((k) => JSON.stringify(k) + ":" + canonicalJsonStringify(obj[k]))
+      .join(",") +
+    "}"
+  );
+}
+function createRecordController({ store, encryption, ipfs, chain }) {
+  const canRead = async (req, patient) => {
+    const reqWallet = canonicalizeWallet(req.user.wallet);
+    const patientWallet = canonicalizeWallet(patient.wallet);
+    if (req.user.role === "admin" || patientWallet === reqWallet) return true;
+    const provider = await store.providerByWallet(reqWallet);
+    return !!(
+      provider &&
+      provider.status === "verified" &&
+      (await store.hasActiveConsent(patient.id, provider.id, "records"))
+    );
+  };
+  return {
+    create: async (req, res) => {
+      const { patientId, recordType, clinicalData } = req.body || {};
+      const patient = await store.patientById(patientId);
+      if (!patient) return res.status(404).json({ error: "Patient not found" });
+      if (!recordType || clinicalData === undefined) {
+        return res
+          .status(400)
+          .json({ error: "recordType and clinicalData are required" });
+      }
+      const providerWallet = canonicalizeWallet(req.user.wallet);
+      const provider = await store.providerByWallet(providerWallet);
+      if (!provider || provider.status !== "verified") {
+        return res
+          .status(403)
+          .json({ error: "Verified provider access required" });
+      }
+      if (!(await store.hasActiveConsent(patient.id, provider.id, "records"))) {
+        return res
+          .status(403)
+          .json({ error: "Active patient consent required to create records" });
+      }
+      try {
+        const encrypted = encryption.encryptJson(clinicalData);
+        const stored = await ipfs.uploadEncrypted(encrypted);
+        const rawHash = crypto
+          .createHash("sha256")
+          .update(canonicalJsonStringify(encrypted))
+          .digest("hex");
+        const bytes32Hash = `0x${rawHash}`;
+        let chainPatientId = chain.enabled
+          ? await chain.patientId(patient.wallet)
+          : null;
+        if (chain.enabled && !chainPatientId) {
+          throw new Error("Patient is not registered on chain");
+        }
+        if (chain.enabled) {
+          await chain.addRecord(
+            chainPatientId,
+            provider.wallet,
+            recordType,
+            stored.cid,
+            bytes32Hash
+          );
+        }
+        const record = await store.addRecord({
+          id: crypto.randomUUID(),
+          patientId,
+          recordType: recordType.trim(),
+          doctorId: provider.wallet,
+          ipfsCid: stored.cid,
+          encryptedHash: rawHash,
+          createdAt: new Date().toISOString(),
+        });
+        await store.addAudit({
+          id: crypto.randomUUID(),
+          patientId,
+          actor: provider.wallet,
+          action: "RECORD_CREATED",
+          recordId: record.id,
+          providerId: provider.id,
+          metadata: { recordType, chainPatientId },
+          timestamp: new Date().toISOString(),
+        });
+        res.status(201).json(record);
+      } catch (e) {
+        console.error("Record creation error:", e);
+        res.status(502).json({ error: "Secure record persistence failed" });
+      }
+    },
+    list: async (req, res) => {
+      const patient = await store.patientById(req.params.patientId);
+      if (!patient) return res.status(404).json({ error: "Patient not found" });
+      if (!(await canRead(req, patient))) {
+        return res
+          .status(403)
+          .json({ error: "Patient consent required for record access" });
+      }
+      res.json(await store.recordsForPatient(patient.id));
+    },
+    detail: async (req, res) => {
+      const patient = await store.patientById(req.params.patientId);
+      if (!patient) return res.status(404).json({ error: "Patient not found" });
+      if (!(await canRead(req, patient))) {
+        return res
+          .status(403)
+          .json({ error: "Patient consent required for record access" });
+      }
+      const record = await store.recordById(patient.id, req.params.recordId);
+      if (!record) return res.status(404).json({ error: "Record not found" });
+      try {
+        const encrypted = await ipfs.fetchEncrypted(record.ipfsCid);
+        const computedHash = crypto
+          .createHash("sha256")
+          .update(canonicalJsonStringify(encrypted))
+          .digest("hex");
+        if (computedHash !== record.encryptedHash) {
+          console.error("Payload hash mismatch for record", record.id);
+          return res.status(500).json({ error: "Encrypted payload integrity check failed" });
+        }
+        const clinicalData = encryption.decryptJson(encrypted);
+        res.json({ ...record, clinicalData });
+      } catch (e) {
+        console.error("Record detail error:", e);
+        res.status(502).json({ error: "Secure record retrieval failed" });
+      }
+    },
+  };
+}
+module.exports = { createRecordController, canonicalJsonStringify };
+````
+
+## File: backend/src/routes/authRoutes.js
+````javascript
+const express = require("express");
+const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
+const { ethers } = require("ethers");
+const { getAdminWallets } = require("../config/authConfig");
+const nonces = new Map();
+const TTL = 5 * 60 * 1000; // 5 minutes
+const DEMO_LOGIN_ENABLED =
+  process.env.NODE_ENV !== "production" && process.env.ALLOW_DEMO_LOGIN !== "false";
+const DEMO_WALLETS = new Set(
+  [
+    "0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c",
+    "0xa2994811542d34846a4Bdd67A1ff29c9514395Ee",
+    "0xA9A65f72a90f4D4021CB56CC70f21D84fD444504",
+    "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+  ].map((w) => ethers.getAddress(w))
+);
+function secret() {
+  const value = process.env.JWT_SECRET;
+  const invalidPlaceholders = [
+    "local-development-secret",
+    "replace-with-a-long-random-secret",
+    "your-secret-key-here",
+  ];
+  if (!value || invalidPlaceholders.includes(value)) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("A strong, non-placeholder JWT_SECRET must be configured in production");
+    }
+    return value || "local-development-secret-fallback-dev-only";
+  }
+  return value;
+}
+function cleanup() {
+  const now = Date.now();
+  for (const [key, v] of nonces) {
+    if (v.expiresAt <= now) nonces.delete(key);
+  }
+}
+module.exports = ({ store }) => {
+  const router = express.Router();
+  router.get("/nonce/:wallet", (req, res) => {
+    cleanup();
+    const rawWallet = req.params.wallet;
+    if (!ethers.isAddress(rawWallet)) {
+      return res.status(400).json({ error: "A valid Ethereum wallet address is required" });
+    }
+    const wallet = ethers.getAddress(rawWallet);
+    const nonce = crypto.randomBytes(32).toString("hex");
+    nonces.set(wallet, { nonce, expiresAt: Date.now() + TTL });
+    res.json({
+      nonce,
+      message: `GoldenHour authentication nonce: ${nonce}`,
+      expiresIn: TTL / 1000,
+    });
+  });
+  router.post("/verify", async (req, res) => {
+    try {
+      cleanup();
+      const { wallet: rawWallet, signature } = req.body || {};
+      if (!rawWallet || !ethers.isAddress(rawWallet) || !signature) {
+        return res.status(400).json({ error: "wallet and signature are required" });
+      }
+      const wallet = ethers.getAddress(rawWallet);
+      const entry = nonces.get(wallet);
+      if (!entry) {
+        return res.status(401).json({ error: "Nonce missing or expired" });
+      }
+      const isDemoSig =
+        DEMO_LOGIN_ENABLED &&
+        DEMO_WALLETS.has(wallet) &&
+        signature === `DEMO_SIGNATURE_${wallet}`;
+      if (!isDemoSig) {
+        const message = `GoldenHour authentication nonce: ${entry.nonce}`;
+        const recoveredRaw = ethers.verifyMessage(message, signature);
+        const recovered = ethers.getAddress(recoveredRaw);
+        if (recovered !== wallet) {
+          return res.status(401).json({ error: "Invalid wallet signature" });
+        }
+      }
+      // Single-use nonce
+      nonces.delete(wallet);
+      const admins = getAdminWallets();
+      const provider = await store.providerByWallet(wallet);
+      const patient = await store.patientByWallet(wallet);
+      let role = "unregistered";
+      if (admins.includes(wallet)) {
+        role = "admin";
+      } else if (provider) {
+        role = "doctor";
+      } else if (patient) {
+        role = "patient";
+      }
+      const user = { wallet, role, patientId: patient ? patient.id : null };
+      const token = jwt.sign(user, secret(), { expiresIn: "15m", algorithm: "HS256", issuer: "goldenhour" });
+      res.json({ token, user });
+    } catch (error) {
+      console.error("Auth verify error:", error);
+      res.status(401).json({ error: "Authentication verification failed" });
+    }
+  });
+  return router;
+};
+````
+
+## File: frontend/src/components/PatientDashboard.jsx
+````javascript
+import { useEffect, useState } from "react";
+import { api } from "../api";
+import QRCodeCard from "./QRCodeCard";
+import RecordTimeline from "./RecordTimeline";
+import ConsentManager from "./ConsentManager";
+export default function PatientDashboard({ patientId = "", wallet = "" }) {
+  const [patient, setPatient] = useState(null);
+  const [records, setRecords] = useState([]);
+  const [audit, setAudit] = useState([]);
+  const [detail, setDetail] = useState(null);
+  const [error, setError] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState({
+    bloodGroup: "",
+    allergies: "",
+    conditions: "",
+    medications: "",
+  });
+  const [busy, setBusy] = useState(false);
+  const [downloadingFhir, setDownloadingFhir] = useState(false);
+  const downloadFhirIPS = async () => {
+    setDownloadingFhir(true);
+    try {
+      const bundle = await api.exportFhir(patientId);
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `FHIR-IPS-${patientId}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError("FHIR export failed: " + e.message);
+    } finally {
+      setDownloadingFhir(false);
+    }
+  };
+  const load = () => {
+    if (!patientId) return;
+    let active = true;
+    api
+      .patient(patientId)
+      .then((data) => {
+        if (active) {
+          setPatient(data);
+          setRecords(data.records || []);
+          setAudit(data.audit || []);
+          setEditForm({
+            bloodGroup: data.critical?.bloodGroup || "",
+            allergies: (data.critical?.allergies || []).join(", "),
+            conditions: (data.critical?.conditions || []).join(", "),
+            medications: (data.critical?.medications || []).join(", "),
+          });
+        }
+      })
+      .catch((err) => active && setError(err.message));
+    return () => {
+      active = false;
+    };
+  };
+  useEffect(load, [patientId]);
+  const viewRecord = async (id) => {
+    try {
+      setDetail(await api.recordDetail(patientId, id));
+      setError("");
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+  const handleProfileSave = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const updatedCritical = {
+        bloodGroup: editForm.bloodGroup.trim(),
+        allergies: editForm.allergies
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        conditions: editForm.conditions
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        medications: editForm.medications
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      };
+      await api.updatePatient(patientId, { critical: updatedCritical });
+      setEditing(false);
+      load();
+    } catch (err) {
+      setError(err.message || "Failed to update profile");
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (error && !patient)
+    return (
+      <div className="panel">
+        <h3>Patient Dashboard</h3>
+        <p className="error">{error}</p>
+      </div>
+    );
+  if (!patient)
+    return (
+      <div className="panel">
+        <p className="muted">Loading patient profile and records...</p>
+      </div>
+    );
+  const critical = patient.critical || {};
+  return (
+    <section className="dashboard">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Patient Dashboard</p>
+          <h2>{patient.profile?.fullName || patient.profile?.name || `Patient ${patient.id}`}</h2>
+        </div>
+        <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+          <button className="secondary" onClick={downloadFhirIPS} disabled={downloadingFhir} style={{ fontSize: "0.85rem", padding: "0.4rem 0.8rem" }}>
+            {downloadingFhir ? "Exporting..." : "📥 Export FHIR R4 (IPS)"}
+          </button>
+          <span className="verified">● Authenticated</span>
+        </div>
+      </div>
+      <div className="grid">
+        <article className="panel profile">
+          <div className="avatar">GH</div>
+          <h3>Patient Identity</h3>
+          <p className="muted" style={{ fontFamily: "monospace", fontSize: "0.85rem" }}>
+            {wallet || patient.wallet}
+          </p>
+          <div className="critical">
+            <span>Blood Group</span>
+            <strong>{critical.bloodGroup || "Not provided"}</strong>
+          </div>
+          <QRCodeCard patientId={patient.id} />
+        </article>
+        <article className="panel">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h3>Critical Medical Context</h3>
+            <button className="secondary" onClick={() => setEditing(!editing)}>
+              {editing ? "Cancel" : "Edit Info"}
+            </button>
+          </div>
+          {editing ? (
+            <form onSubmit={handleProfileSave} style={{ marginTop: "1rem" }}>
+              <label>Blood Group</label>
+              <input
+                value={editForm.bloodGroup}
+                onChange={(e) => setEditForm({ ...editForm, bloodGroup: e.target.value })}
+                placeholder="e.g. O+"
+              />
+              <label>Allergies (comma-separated)</label>
+              <input
+                value={editForm.allergies}
+                onChange={(e) => setEditForm({ ...editForm, allergies: e.target.value })}
+                placeholder="Penicillin, Peanuts"
+              />
+              <label>Conditions (comma-separated)</label>
+              <input
+                value={editForm.conditions}
+                onChange={(e) => setEditForm({ ...editForm, conditions: e.target.value })}
+                placeholder="Asthma, Diabetes Type II"
+              />
+              <label>Medications (comma-separated)</label>
+              <input
+                value={editForm.medications}
+                onChange={(e) => setEditForm({ ...editForm, medications: e.target.value })}
+                placeholder="Albuterol, Insulin"
+              />
+              <button className="primary" type="submit" disabled={busy} style={{ marginTop: "1rem" }}>
+                {busy ? "Saving..." : "Save Critical Info"}
+              </button>
+            </form>
+          ) : (
+            <>
+              <div className="data-row">
+                <span>Allergies</span>
+                <b>{(critical.allergies || []).join(", ") || "None recorded"}</b>
+              </div>
+              <div className="data-row">
+                <span>Known Conditions</span>
+                <b>{(critical.conditions || []).join(", ") || "None recorded"}</b>
+              </div>
+              <div className="data-row">
+                <span>Current Medications</span>
+                <b>{(critical.medications || []).join(", ") || "None recorded"}</b>
+              </div>
+            </>
+          )}
+        </article>
+        <article className="panel wide">
+          <h3>Medical Records Timeline</h3>
+          <RecordTimeline records={records} onView={viewRecord} />
+          {detail && (
+            <div className="record-detail" style={{ marginTop: "1rem", padding: "1rem", background: "rgba(255,255,255,0.05)", borderRadius: "8px" }}>
+              <h4>{detail.recordType}</h4>
+              <p className="muted">Uploaded: {new Date(detail.createdAt).toLocaleString()}</p>
+              <pre>{JSON.stringify(detail.clinicalData, null, 2)}</pre>
+            </div>
+          )}
+        </article>
+        <article className="panel wide">
+          <h3>Patient Audit History</h3>
+          {audit.length === 0 ? (
+            <p className="muted">No audit events logged yet.</p>
+          ) : (
+            audit.map((a) => (
+              <div className="data-row" key={a.id}>
+                <span>
+                  <b>{a.action}</b>
+                  <small>Actor: {a.actor}</small>
+                  {a.metadata?.justification && (
+                    <small style={{ color: "#f59e0b" }}>Reason: {a.metadata.justification}</small>
+                  )}
+                </span>
+                <small>{new Date(a.created_at || a.timestamp).toLocaleString()}</small>
+              </div>
+            ))
+          )}
+        </article>
+        <ConsentManager patientId={patient.id} />
+      </div>
+    </section>
+  );
+}
+````
+
+## File: frontend/src/api.js
+````javascript
+import { clearBrowserSession, markWalletConnected } from "./utils/session";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
+export function setToken(t) {
+  if (typeof localStorage === "undefined") return;
+  if (t) {
+    localStorage.setItem("goldenhour_token", t);
+    markWalletConnected();
+  } else {
+    localStorage.removeItem("goldenhour_token");
+  }
+}
+export function getToken() {
+  if (typeof localStorage !== "undefined") {
+    return localStorage.getItem("goldenhour_token");
+  }
+  return null;
+}
+export async function request(path, options = {}) {
+  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const r = await fetch(`${API_URL}${path}`, { ...options, headers });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    if (r.status === 401 && path !== "/api/auth/verify") {
+      clearBrowserSession();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("goldenhour_session_expired"));
+      }
+    }
+    const error = new Error(data.error || `Request failed: ${r.status}`);
+    error.status = r.status;
+    error.code = data.code;
+    throw error;
+  }
+  return data;
+}
+export const api = {
+  nonce: (wallet) => request(`/api/auth/nonce/${wallet}`),
+  verify: (body) => request("/api/auth/verify", { method: "POST", body: JSON.stringify(body) }),
+  patient: (id) => request(`/api/patient/${id}`),
+  createPatient: (body) => request("/api/patient", { method: "POST", body: JSON.stringify(body) }),
+  updatePatient: (id, body) => request(`/api/patient/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  providerAccess: () => request("/api/doctor/me"),
+  registerProvider: (body) => request("/api/doctor/register", { method: "POST", body: JSON.stringify(body) }),
+  providerConsents: () => request("/api/doctor/consents"),
+  patientConsents: (id) => request(`/api/patient/${id}/consents`),
+  grantConsent: (id, body) => request(`/api/patient/${id}/consent`, { method: "POST", body: JSON.stringify(body) }),
+  revokeConsent: (id, body) => request(`/api/patient/${id}/consent/revoke`, { method: "POST", body: JSON.stringify(body) }),
+  emergency: (body) => request("/api/emergency", { method: "POST", body: JSON.stringify(body) }),
+  emergencyCritical: (id) => request(`/api/emergency/${id}/critical`),
+  addRecord: (id, body) => request(`/api/doctor/patient/${id}/record`, { method: "POST", body: JSON.stringify(body) }),
+  verifyRecord: (cid) => request(`/api/record/verify/${cid}`),
+  // Compliance API (DPDP / FHIR)
+  exportFhir: (id) => request(`/api/compliance/export/${id}`),
+  submitDSR: (body) => request("/api/compliance/dsr", { method: "POST", body: JSON.stringify(body) }),
+};
+````
+
+## File: frontend/src/pages/login.jsx
+````javascript
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { ethers } from "ethers";
+import { api, setToken } from "../api";
+import { DEMO_ACCOUNTS } from "../config/demoAccounts";
+export default function Login({ onLogin }) {
+  const navigate = useNavigate();
+  const [wallet, setWallet] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const authenticateWithSigner = async (targetWallet, signFn) => {
+    setBusy(true);
+    setError("");
+    try {
+      const nonce = await api.nonce(targetWallet);
+      const signature = await signFn(nonce.message);
+      const result = await api.verify({ wallet: targetWallet, signature });
+      setToken(result.token);
+      let user = result.user;
+      try {
+        const mine = await api.me();
+        user = { ...user, patientId: mine.patientId };
+      } catch (err) {
+        if (err.status !== 404 || err.code !== "PATIENT_NOT_REGISTERED") {
+          console.error("Profile check error:", err);
+        }
+      }
+      onLogin(user);
+      navigate(
+        user.role === "admin"
+          ? "/admin"
+          : user.role === "doctor"
+          ? "/doctor"
+          : user.patientId
+          ? "/patient/me"
+          : "/onboarding"
+      );
+    } catch (err) {
+      if (
+        err.code === "ACTION_REJECTED" ||
+        err.code === 4001 ||
+        (err.message && err.message.includes("rejected")) ||
+        (err.message && err.message.includes("denied"))
+      ) {
+        setError("Message signature request was cancelled");
+      } else {
+        setError(err.message || "Authentication failed");
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  const submitMetaMask = async () => {
+    if (!window.ethereum) {
+      setError("MetaMask browser extension not detected");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      await provider.send("eth_requestAccounts", []);
+      const signer = await provider.getSigner();
+      const activeWallet = await signer.getAddress();
+      setWallet(activeWallet);
+      await authenticateWithSigner(activeWallet, async (msg) => {
+        return await signer.signMessage(msg);
+      });
+    } catch (err) {
+      if (
+        err.code === "ACTION_REJECTED" ||
+        err.code === 4001 ||
+        (err.message && err.message.includes("rejected")) ||
+        (err.message && err.message.includes("denied"))
+      ) {
+        setError("Message signature request was cancelled");
+      } else {
+        setError(err.message || "Authentication failed");
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  const switchMetaMaskAccount = async () => {
+    if (!window.ethereum) return;
+    try {
+      await window.ethereum.request({
+        method: "wallet_requestPermissions",
+        params: [{ eth_accounts: {} }],
+      });
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      const newAddress = await signer.getAddress();
+      setWallet(newAddress);
+    } catch (e) {
+      console.warn("Account switch cancelled", e);
+    }
+  };
+  const submitDemoAccount = async (role) => {
+    const acc = DEMO_ACCOUNTS[role];
+    if (!acc) return;
+    await authenticateWithSigner(acc.wallet, async () => {
+      return `DEMO_SIGNATURE_${acc.wallet}`;
+    });
+  };
+  return (
+    <section className="dashboard">
+      <div className="panel login-panel">
+        <p className="eyebrow">Cryptographic Authentication</p>
+        <h2>Sign in to GoldenHour</h2>
+        <p className="muted">
+          Authentication uses an EIP-191 one-time nonce and wallet signature. Server verifies ownership and assigns role permissions.
+        </p>
+        <div style={{ marginBottom: "1.5rem" }}>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={submitMetaMask}
+              style={{ flex: 2, padding: "0.85rem 1.25rem", fontSize: "0.95rem" }}
+            >
+              {busy ? "Verifying signature…" : "Sign Message with MetaMask"}
+            </button>
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={switchMetaMaskAccount}
+              style={{ flex: 1, fontSize: "0.85rem" }}
+              title="Switch active MetaMask account"
+            >
+              🔄 Switch Account
+            </button>
+          </div>
+        </div>
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: "1.25rem", marginTop: "1rem" }}>
+          <p className="eyebrow">Instant Demo Sign-In (No Extension Required)</p>
+          <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+            <button
+              className="secondary"
+              style={{ flex: 1, fontSize: "0.85rem" }}
+              disabled={busy}
+              onClick={() => submitDemoAccount("admin")}
+            >
+              🔑 Demo Admin (Acc 1)
+            </button>
+            <button
+              className="secondary"
+              style={{ flex: 1, fontSize: "0.85rem" }}
+              disabled={busy}
+              onClick={() => submitDemoAccount("doctor")}
+            >
+              🩺 Demo Provider (Acc 2)
+            </button>
+            <button
+              className="secondary"
+              style={{ flex: 1, fontSize: "0.85rem" }}
+              disabled={busy}
+              onClick={() => submitDemoAccount("patient")}
+            >
+              👤 Demo Patient (Acc 3)
+            </button>
+          </div>
+        </div>
+        {error && <p className="error" style={{ color: "#ef4444", marginTop: "1rem" }}>{error}</p>}
+      </div>
+    </section>
+  );
+}
+````
+
+## File: frontend/src/App.jsx
+````javascript
+import { useState, useEffect, useRef } from "react";
+import { Link, Route, Routes, useNavigate, useParams, Navigate } from "react-router-dom";
+import PatientDashboard from "./components/PatientDashboard";
+import DoctorDashboard from "./components/DoctorDashboard";
+import EmergencyScanView from "./components/EmergencyScanView";
+import PatientOnboarding from "./components/PatientOnboarding";
+import AdminDashboard from "./components/AdminDashboard";
+import Login from "./pages/login";
+import WalletConnectButton from "./components/WalletConnectButton";
+import ErrorBoundary from "./components/ErrorBoundary";
+import { fullLogoutCleanup } from "./utils/session";
+import { isDemoWallet } from "./config/demoAccounts";
+function Home({ user }) {
+  return (
+    <section className="hero">
+      <div>
+        <p className="eyebrow">Every second matters</p>
+        <h1>Medical context when <em>minutes matter.</em></h1>
+        <p className="lead">
+          Encrypted records, wallet-verified authentication, patient-controlled access, and immutable audit trails.
+        </p>
+        <div className="hero-actions">
+          {!user ? (
+            <Link className="primary" to="/login">Sign In / Register</Link>
+          ) : user.role === "admin" ? (
+            <Link className="primary" to="/admin">Go to Admin Portal</Link>
+          ) : user.role === "doctor" ? (
+            <Link className="primary" to="/doctor">Go to Provider Portal</Link>
+          ) : (
+            <Link className="primary" to={user.patientId ? "/patient/me" : "/onboarding"}>
+              {user.patientId ? "Go to Patient Portal" : "Complete Patient Onboarding"}
+            </Link>
+          )}
+          <Link className="secondary" to="/emergency">Emergency Access</Link>
+        </div>
+      </div>
+    </section>
+  );
+}
+function PatientRoute({ user }) {
+  const { id } = useParams();
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role === "doctor") return <Navigate to="/doctor" replace />;
+  if (user.role === "admin") return <Navigate to="/admin" replace />;
+  if (id === "me" && !user.patientId) return <Navigate to="/onboarding" replace />;
+  return <PatientDashboard patientId={id === "me" ? user.patientId : id} wallet={user.wallet} />;
+}
+function DoctorRoute({ user }) {
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role !== "doctor" && user.role !== "admin") {
+    return <Navigate to={user.patientId ? "/patient/me" : "/onboarding"} replace />;
+  }
+  return <DoctorDashboard wallet={user.wallet} />;
+}
+function AdminRoute({ user }) {
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role !== "admin") {
+    return <Navigate to={user.role === "doctor" ? "/doctor" : user.patientId ? "/patient/me" : "/login"} replace />;
+  }
+  return <AdminDashboard />;
+}
+function EmergencyRoute() {
+  const { id } = useParams();
+  return <EmergencyScanView initialPatientId={id || ""} />;
+}
+export default function App() {
+  const [user, setUser] = useState(() =>
+    JSON.parse(localStorage.getItem("goldenhour_user") || "null")
+  );
+  const navigate = useNavigate();
+  const loggingOutRef = useRef(false);
+  const sessionGen = useRef(0);
+  const ignoreEmptyAccountsUntil = useRef(0);
+  const login = (next) => {
+    sessionGen.current += 1;
+    loggingOutRef.current = false;
+    ignoreEmptyAccountsUntil.current = Date.now() + 2000;
+    localStorage.setItem("goldenhour_user", JSON.stringify(next));
+    setUser(next);
+  };
+  const complete = (payload = {}) =>
+    login({
+      ...user,
+      ...payload,
+      role: payload.role || user?.role,
+      patientId: payload.id ?? payload.patientId ?? user?.patientId ?? null,
+    });
+  const logout = () => {
+    if (loggingOutRef.current) return;
+    loggingOutRef.current = true;
+    const gen = sessionGen.current;
+    setUser(null);
+    void fullLogoutCleanup().finally(() => {
+      if (sessionGen.current !== gen) return;
+      navigate("/login");
+    });
+  };
+  useEffect(() => {
+    const handleExpired = () => {
+      logout();
+    };
+    window.addEventListener("goldenhour_session_expired", handleExpired);
+    const handleAccountsChanged = (accounts) => {
+      if (!user || loggingOutRef.current) return;
+      if (isDemoWallet(user.wallet)) return;
+      if (!accounts || accounts.length === 0) {
+        if (Date.now() < ignoreEmptyAccountsUntil.current) return;
+        logout();
+        return;
+      }
+      const newAddress = accounts[0].toLowerCase();
+      const currentAddress = (user.wallet || "").toLowerCase();
+      if (newAddress !== currentAddress) {
+        logout();
+      }
+    };
+    if (window.ethereum) {
+      window.ethereum.on("accountsChanged", handleAccountsChanged);
+    }
+    return () => {
+      window.removeEventListener("goldenhour_session_expired", handleExpired);
+      if (window.ethereum && window.ethereum.removeListener) {
+        window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
+      }
+    };
+  }, [user]);
+  return (
+    <ErrorBoundary>
+      <div className="app">
+        <header>
+          <Link className="brand" to="/">
+            <span className="mark">GH</span>
+            <div>
+              <strong>GoldenHour</strong>
+              <small>Trusted Emergency History</small>
+            </div>
+          </Link>
+          <nav>
+            {user?.role === "admin" && (
+              <Link to="/admin">🔑 Admin Portal</Link>
+            )}
+            {user?.role === "doctor" && (
+              <Link to="/doctor">🩺 Provider Portal</Link>
+            )}
+            {user?.role === "patient" && (
+              user.patientId ? (
+                <Link to="/patient/me">👤 Patient Portal</Link>
+              ) : (
+                <Link to="/onboarding" style={{ color: "#10b981", fontWeight: "bold" }}>
+                  📝 Complete Onboarding
+                </Link>
+              )
+            )}
+            {user?.role === "unregistered" && (
+              <Link to="/onboarding" style={{ color: "#10b981", fontWeight: "bold" }}>
+                📝 Account Onboarding
+              </Link>
+            )}
+            <Link to="/emergency">🚨 Emergency Access</Link>
+          </nav>
+          {user ? (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              <span className="badge" style={{ textTransform: "uppercase", fontSize: "0.75rem" }}>
+                {user.role}
+              </span>
+              <button className="logout-btn" onClick={logout}>
+                🚪 Disconnect & Logout
+              </button>
+            </div>
+          ) : (
+            <WalletConnectButton onConnected={() => navigate("/login")} />
+          )}
+        </header>
+        <main>
+          <Routes>
+            <Route path="/" element={<Home user={user} />} />
+            <Route
+              path="/login"
+              element={
+                user ? (
+                  <Navigate
+                    to={
+                      user.role === "admin"
+                        ? "/admin"
+                        : user.role === "doctor"
+                        ? "/doctor"
+                        : user.patientId
+                        ? "/patient/me"
+                        : "/onboarding"
+                    }
+                    replace
+                  />
+                ) : (
+                  <Login onLogin={login} />
+                )
+              }
+            />
+            <Route
+              path="/onboarding"
+              element={user ? <PatientOnboarding onComplete={complete} /> : <Navigate to="/login" />}
+            />
+            <Route path="/patient/:id" element={<PatientRoute user={user} />} />
+            <Route path="/doctor" element={<DoctorRoute user={user} />} />
+            <Route path="/admin" element={<AdminRoute user={user} />} />
+            <Route path="/emergency" element={<EmergencyRoute />} />
+            <Route path="/emergency/:id" element={<EmergencyRoute />} />
+          </Routes>
+        </main>
+        <footer>
+          <span>GoldenHour</span>
+          <span>Wallet Verification • AES-256-GCM Encryption • Authenticated API</span>
+        </footer>
+      </div>
+    </ErrorBoundary>
+  );
+}
+````
+
+## File: backend/package.json
+````json
+{
+  "name": "golden-hour-backend",
+  "version": "2.2.0",
+  "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "node --watch src/app.js",
+    "start": "node src/app.js",
+    "check": "node check.js",
+    "test": "node --test test/*.test.js",
+    "db:migrate": "node src/config/migrate.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.4",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.1",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "supertest": "^7.2.2"
+  }
+}
+````
+
+## File: backend/src/app.js
+````javascript
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, "../.env") });
+require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
+const crypto = require("crypto");
+const { createStore } = require("./config/db");
+const { ChainService } = require("./services/chainService");
+const defaultEncryption = require("./services/encryptionService");
+const defaultIpfs = require("./services/ipfsService");
+const { createPatientController } = require("./controllers/patientController");
+const { createDoctorController } = require("./controllers/doctorController");
+const { createRecordController } = require("./controllers/recordController");
+const { createEmergencyController } = require("./controllers/emergencyController");
+const { createConsentController } = require("./controllers/consentController");
+const { createComplianceController } = require("./controllers/complianceController");
+const patientRoutes = require("./routes/patientRoutes");
+const doctorRoutes = require("./routes/doctorRoutes");
+const recordRoutes = require("./routes/recordRoutes");
+const emergencyRoutes = require("./routes/emergencyRoutes");
+const consentRoutes = require("./routes/consentRoutes");
+const authRoutes = require("./routes/authRoutes");
+const complianceRoutes = require("./routes/complianceRoutes");
+async function createApp({
+  store,
+  chain = new ChainService(),
+  encryption = defaultEncryption,
+  ipfs = defaultIpfs,
+} = {}) {
+  store = store || (await createStore());
+  const app = express();
+  app.disable("x-powered-by");
+  if (process.env.TRUST_PROXY) {
+    app.set("trust proxy", process.env.TRUST_PROXY === "true" ? 1 : process.env.TRUST_PROXY);
+  }
+  app.use((req, res, next) => {
+    req.requestId = crypto.randomUUID();
+    res.setHeader("X-Request-Id", req.requestId);
+    next();
+  });
+  const allowedOrigins = (process.env.FRONTEND_ORIGIN || "http://localhost:5173,http://localhost:3000")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+  app.use(
+    helmet(),
+    cors({
+      origin: (origin, callback) => {
+        // Bug #9 Fix: Do not allow missing origin in production
+        if (!origin) {
+          if (process.env.NODE_ENV === "production") {
+            return callback(new Error("CORS policy restriction: Origin header required in production"));
+          }
+          return callback(null, true);
+        }
+        if (allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+        callback(new Error("CORS policy restriction: Origin not allowed"));
+      },
+      credentials: true,
+    }),
+    express.json({ limit: "256kb" })
+  );
+  app.use(
+    "/api",
+    rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 300,
+      standardHeaders: true,
+      legacyHeaders: false,
+    })
+  );
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 60,
+    message: { error: "Too many authentication requests, please try again later" },
+  });
+  const c = { store, chain, encryption, ipfs };
+  app.get("/health", (_q, s) =>
+    s.json({
+      status: "ok",
+      chain: chain.enabled ? "backend-relay-configured" : "not-configured",
+    })
+  );
+  app.get("/ready", async (_q, s) => {
+    try {
+      if (store.query) {
+        // Bug #31 Fix: Verify migration table exists in database
+        await store.query("SELECT filename FROM schema_migrations LIMIT 1");
+      }
+      s.json({
+        status: "ready",
+        database: process.env.DATABASE_URL ? "postgres" : "local",
+      });
+    } catch (e) {
+      s.status(503).json({ status: "not_ready", error: "Database or schema migrations not ready" });
+    }
+  });
+  app.use("/api/auth", authLimiter, authRoutes({ store }));
+  app.use("/api/patients", patientRoutes(createPatientController(c)));
+  app.use("/api/doctors", doctorRoutes(createDoctorController(c)));
+  app.use("/api/records", recordRoutes(createRecordController(c), store));
+  app.use("/api/emergency-access", emergencyRoutes(createEmergencyController(c), store));
+  app.use("/api/consents", consentRoutes(createConsentController(c)));
+  app.use("/api/compliance", complianceRoutes(createComplianceController(c)));
+  app.use((err, req, res, _next) => {
+    console.error(`[Error ${req.requestId}]`, err);
+    res.status(500).json({
+      error: "Internal server error",
+      requestId: req.requestId,
+    });
+  });
+  return app;
+}
+if (require.main === module) {
+  createApp().then((app) => {
+    const port = process.env.PORT || 4000;
+    const server = app.listen(port, () => {
+      console.log(`GoldenHour backend listening on port ${port}`);
+    });
+    process.on("SIGTERM", () => {
+      console.log("SIGTERM signal received: closing HTTP server");
+      server.close(() => console.log("HTTP server closed"));
+    });
+  });
+}
+module.exports = { createApp };
+````
+
+## File: backend/src/config/db.js
+````javascript
+const { Pool } = require("pg");
+const fs = require("fs");
+const path = require("path");
+const { ethers } = require("ethers");
+function isValidUuid(id) {
+  return typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+function canonicalizeWallet(wallet) {
+  if (!wallet) return wallet;
+  try {
+    return ethers.getAddress(wallet);
+  } catch (e) {
+    return wallet.toLowerCase();
+  }
+}
+function normalizePatient(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    wallet: canonicalizeWallet(row.wallet),
+    profile: typeof row.profile === "string" ? JSON.parse(row.profile) : (row.profile || {}),
+    critical: typeof row.critical === "string" ? JSON.parse(row.critical) : (row.critical || {}),
+    createdAt: row.created_at || row.createdAt,
+  };
+}
+function normalizeProvider(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    wallet: canonicalizeWallet(row.wallet),
+    name: row.name,
+    licenseNumber: row.license_number || row.licenseNumber,
+    specialty: row.specialty,
+    status: row.status,
+    verifiedBy: row.verified_by ? canonicalizeWallet(row.verified_by) : (row.verifiedBy ? canonicalizeWallet(row.verifiedBy) : null),
+    verifiedAt: row.verified_at || row.verifiedAt || null,
+    createdAt: row.created_at || row.createdAt,
+  };
+}
+function normalizeRecord(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    patientId: row.patient_id || row.patientId,
+    recordType: row.record_type || row.recordType,
+    doctorId: row.doctor_id || row.doctorId,
+    doctorWallet: row.doctor_id || row.doctorId || row.doctorWallet,
+    ipfsCid: row.ipfs_cid || row.ipfsCid,
+    encryptedHash: row.encrypted_hash || row.encryptedHash,
+    createdAt: row.created_at || row.createdAt,
+  };
+}
+function normalizeAudit(row) {
+  if (!row) return null;
+  const metadata = typeof row.metadata === "string" ? JSON.parse(row.metadata) : (row.metadata || {});
+  return {
+    id: row.id,
+    patientId: row.patient_id || row.patientId || null,
+    actor: canonicalizeWallet(row.actor),
+    action: row.action,
+    recordId: row.record_id || row.recordId || null,
+    providerId: row.provider_id || row.providerId || null,
+    metadata,
+    expiresAt: row.expires_at || row.expiresAt || null,
+    timestamp: row.created_at || row.timestamp || row.createdAt,
+    createdAt: row.created_at || row.createdAt,
+  };
+}
+function normalizeConsent(row) {
+  if (!row) return null;
+  const scope = typeof row.scope === "string" ? JSON.parse(row.scope) : (row.scope || ["records"]);
+  return {
+    id: row.id,
+    patientId: row.patient_id || row.patientId,
+    providerId: row.provider_id || row.providerId,
+    status: row.status,
+    scope,
+    grantedAt: row.granted_at || row.grantedAt,
+    revokedAt: row.revoked_at || row.revokedAt || null,
+    providerWallet: row.provider_wallet ? canonicalizeWallet(row.provider_wallet) : (row.providerWallet ? canonicalizeWallet(row.providerWallet) : undefined),
+    providerName: row.provider_name || row.providerName || undefined,
+    providerSpecialty: row.provider_specialty || row.providerSpecialty || undefined,
+    patientWallet: row.patient_wallet ? canonicalizeWallet(row.patient_wallet) : (row.patientWallet ? canonicalizeWallet(row.patientWallet) : undefined),
+    patientProfile: row.patient_profile ? (typeof row.patient_profile === "string" ? JSON.parse(row.patient_profile) : row.patient_profile) : (row.patientProfile || undefined),
+  };
+}
+function getDbSslConfig() {
+  if (process.env.DB_SSL !== "true") return undefined;
+  const isProduction = process.env.NODE_ENV === "production";
+  if (isProduction && !process.env.DB_CA) {
+    throw new Error("DB_CA certificate path is strictly required in production when DB_SSL is enabled");
+  }
+  // Reject unauthorized by default unless explicitly disabled with DB_REJECT_UNAUTHORIZED="false"
+  const rejectUnauthorized = process.env.DB_REJECT_UNAUTHORIZED !== "false";
+  if (process.env.DB_CA) {
+    return {
+      ca: fs.readFileSync(process.env.DB_CA).toString(),
+      rejectUnauthorized,
+    };
+  }
+  return { rejectUnauthorized };
+}
+function createPool() {
+  if (!process.env.DATABASE_URL) return null;
+  return new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: getDbSslConfig(),
+    max: Number(process.env.DB_POOL_SIZE || 10),
+    idleTimeoutMillis: 10000,
+    connectionTimeoutMillis: 5000,
+  });
+}
+class PostgresStore {
+  constructor(pool) {
+    this.pool = pool;
+  }
+  async query(q, p = []) {
+    try {
+      return await this.pool.query(q, p);
+    } catch (e) {
+      if (
+        e.message &&
+        (e.message.includes("Connection terminated") ||
+          e.message.includes("closed") ||
+          e.message.includes("reset"))
+      ) {
+        return await this.pool.query(q, p);
+      }
+      throw e;
+    }
+  }
+  async patientById(id) {
+    if (!isValidUuid(id)) return null;
+    const r = await this.query("SELECT * FROM patients WHERE id=$1", [id]);
+    return normalizePatient(r.rows[0]);
+  }
+  async patientByWallet(wallet) {
+    if (!wallet) return null;
+    const w = wallet.toLowerCase();
+    const r = await this.query("SELECT * FROM patients WHERE lower(wallet)=$1", [w]);
+    return r && r.rows && r.rows.length > 0 ? normalizePatient(r.rows[0]) : null;
+  }
+  async allPatients() {
+    const r = await this.query("SELECT * FROM patients ORDER BY created_at DESC");
+    return r.rows.map(normalizePatient);
+  }
+  async addPatient(x) {
+    const w = canonicalizeWallet(x.wallet);
+    const r = await this.query(
+      "INSERT INTO patients(id,wallet,profile,critical,created_at) VALUES($1,$2,$3,$4,$5) RETURNING *",
+      [x.id, w, JSON.stringify(x.profile || {}), JSON.stringify(x.critical || {}), x.createdAt]
+    );
+    return normalizePatient(r.rows[0]);
+  }
+  async updatePatient(id, patch) {
+    if (!isValidUuid(id)) return null;
+    const current = await this.patientById(id);
+    if (!current) return null;
+    const newProfile = patch.profile ? { ...current.profile, ...patch.profile } : current.profile;
+    const newCritical = patch.critical ? { ...current.critical, ...patch.critical } : current.critical;
+    const r = await this.query(
+      "UPDATE patients SET profile=$2, critical=$3 WHERE id=$1 RETURNING *",
+      [id, JSON.stringify(newProfile), JSON.stringify(newCritical)]
+    );
+    return normalizePatient(r.rows[0]);
+  }
+  async recordsForPatient(id) {
+    if (!isValidUuid(id)) return [];
+    const r = await this.query("SELECT * FROM records WHERE patient_id=$1 ORDER BY created_at DESC", [id]);
+    return r.rows.map(normalizeRecord);
+  }
+  async recordById(patientId, recordId) {
+    if (!isValidUuid(patientId) || !isValidUuid(recordId)) return null;
+    const r = await this.query("SELECT * FROM records WHERE patient_id=$1 AND id=$2", [patientId, recordId]);
+    return normalizeRecord(r.rows[0]);
+  }
+  async addRecord(x) {
+    const r = await this.query(
+      "INSERT INTO records(id,patient_id,record_type,doctor_id,ipfs_cid,encrypted_hash,created_at) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *",
+      [x.id, x.patientId, x.recordType, x.doctorId, x.ipfsCid, x.encryptedHash, x.createdAt]
+    );
+    return normalizeRecord(r.rows[0]);
+  }
+  async addAudit(x) {
+    const r = await this.query(
+      "INSERT INTO audit_logs(id,patient_id,actor,action,record_id,provider_id,metadata,expires_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *",
+      [
+        x.id,
+        isValidUuid(x.patientId) ? x.patientId : null,
+        canonicalizeWallet(x.actor),
+        x.action,
+        isValidUuid(x.recordId) ? x.recordId : null,
+        isValidUuid(x.providerId) ? x.providerId : null,
+        JSON.stringify(x.metadata || {}),
+        x.expiresAt || null,
+        x.timestamp || new Date().toISOString(),
+      ]
+    );
+    return normalizeAudit(r.rows[0]);
+  }
+  async auditForPatient(id) {
+    if (!isValidUuid(id)) return [];
+    const r = await this.query("SELECT * FROM audit_logs WHERE patient_id=$1 ORDER BY created_at DESC", [id]);
+    return r.rows.map(normalizeAudit);
+  }
+  async recentAudits(limit = 50) {
+    const r = await this.query("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT $1", [limit]);
+    return r.rows.map(normalizeAudit);
+  }
+  async auditById(id) {
+    if (!isValidUuid(id)) return null;
+    const r = await this.query("SELECT * FROM audit_logs WHERE id=$1", [id]);
+    return normalizeAudit(r.rows[0]);
+  }
+  async providerByWallet(wallet) {
+    if (!wallet) return null;
+    const w = wallet.toLowerCase();
+    const r = await this.query("SELECT * FROM providers WHERE lower(wallet)=$1", [w]);
+    return r && r.rows && r.rows.length > 0 ? normalizeProvider(r.rows[0]) : null;
+  }
+  async providerById(id) {
+    if (!isValidUuid(id)) return null;
+    const r = await this.query("SELECT * FROM providers WHERE id=$1", [id]);
+    return normalizeProvider(r.rows[0]);
+  }
+  async providers(status) {
+    const r = await this.query(
+      status
+        ? "SELECT * FROM providers WHERE status=$1 ORDER BY created_at DESC"
+        : "SELECT * FROM providers ORDER BY created_at DESC",
+      status ? [status] : []
+    );
+    return r.rows.map(normalizeProvider);
+  }
+  async addProvider(x) {
+    const w = canonicalizeWallet(x.wallet);
+    const r = await this.query(
+      "INSERT INTO providers(id,wallet,name,license_number,specialty,status,created_at) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *",
+      [x.id, w, x.name, x.licenseNumber, x.specialty, x.status, x.createdAt]
+    );
+    return normalizeProvider(r.rows[0]);
+  }
+  async grantConsent(x) {
+    const r = await this.query(
+      "INSERT INTO patient_provider_consents(id,patient_id,provider_id,status,scope,granted_at) VALUES($1,$2,$3,'active',$4,$5) ON CONFLICT(patient_id,provider_id) DO UPDATE SET status='active',scope=EXCLUDED.scope,granted_at=EXCLUDED.granted_at,revoked_at=null RETURNING *",
+      [x.id, x.patientId, x.providerId, JSON.stringify(x.scope), x.grantedAt]
+    );
+    return normalizeConsent(r.rows[0]);
+  }
+  async revokeConsent(patientId, providerId) {
+    const r = await this.query(
+      "UPDATE patient_provider_consents SET status='revoked',revoked_at=now() WHERE patient_id=$1 AND provider_id=$2 AND status='active' RETURNING *",
+      [patientId, providerId]
+    );
+    return normalizeConsent(r.rows[0]);
+  }
+  async hasActiveConsent(patientId, providerId, scope) {
+    const r = await this.query(
+      "SELECT scope FROM patient_provider_consents WHERE patient_id=$1 AND provider_id=$2 AND status='active'",
+      [patientId, providerId]
+    );
+    return !!r.rows.find((x) => {
+      const s = typeof x.scope === "string" ? JSON.parse(x.scope) : x.scope;
+      return Array.isArray(s) && s.includes(scope);
+    });
+  }
+  async consentsForPatient(id) {
+    const r = await this.query(
+      "SELECT c.*, p.wallet as provider_wallet, p.name as provider_name, p.specialty as provider_specialty FROM patient_provider_consents c JOIN providers p ON p.id=c.provider_id WHERE c.patient_id=$1 ORDER BY c.granted_at DESC",
+      [id]
+    );
+    return r.rows.map(normalizeConsent);
+  }
+  async consentsForProvider(providerId) {
+    const r = await this.query(
+      "SELECT c.*, pt.wallet as patient_wallet, pt.profile as patient_profile FROM patient_provider_consents c JOIN patients pt ON pt.id=c.patient_id WHERE c.provider_id=$1 AND c.status='active' ORDER BY c.granted_at DESC",
+      [providerId]
+    );
+    return r.rows.map(normalizeConsent);
+  }
+  async updateProvider(wallet, patch) {
+    const r = await this.query(
+      "UPDATE providers SET status=$2, verified_by=$3, verified_at=$4, updated_at=now() WHERE lower(wallet)=lower($1) RETURNING *",
+      [wallet, patch.status, patch.verifiedBy || null, patch.verifiedAt || null]
+    );
+    return normalizeProvider(r.rows[0]);
+  }
+}
+class JsonStore {
+  constructor(
+    file = process.env.DATA_FILE ||
+      (fs.existsSync(path.join(process.cwd(), ".data", "goldenhour.json"))
+        ? path.join(process.cwd(), ".data", "goldenhour.json")
+        : path.join(__dirname, "../../.data", "goldenhour.json"))
+  ) {
+    this.file = file;
+    this.state = {
+      patients: [],
+      records: [],
+      audit: [],
+      providers: [],
+      consents: [],
+    };
+    if (fs.existsSync(file)) {
+      try {
+        this.state = { ...this.state, ...JSON.parse(fs.readFileSync(file, "utf8")) };
+      } catch (e) {
+        console.error("Warning: Failed to parse JsonStore file, initializing empty state", e);
+      }
+    }
+  }
+  async patientById(id) {
+    return normalizePatient(this.state.patients.find((x) => x.id === id));
+  }
+  async patientByWallet(w) {
+    return normalizePatient(
+      this.state.patients.find(
+        (x) => x.wallet.toLowerCase() === w.toLowerCase()
+      )
+    );
+  }
+  async allPatients() {
+    return this.state.patients.map(normalizePatient);
+  }
+  async addPatient(x) {
+    const entry = normalizePatient({ ...x, wallet: canonicalizeWallet(x.wallet) });
+    this.state.patients.push(entry);
+    this.save();
+    return entry;
+  }
+  async updatePatient(id, patch) {
+    const index = this.state.patients.findIndex((x) => x.id === id);
+    if (index === -1) return null;
+    const x = this.state.patients[index];
+    if (patch.profile) x.profile = { ...x.profile, ...patch.profile };
+    if (patch.critical) x.critical = { ...x.critical, ...patch.critical };
+    this.save();
+    return normalizePatient(x);
+  }
+  async recordsForPatient(id) {
+    return this.state.records
+      .filter((x) => x.patientId === id || x.patient_id === id)
+      .sort((a, b) => new Date(b.createdAt || b.created_at) - new Date(a.createdAt || a.created_at))
+      .map(normalizeRecord);
+  }
+  async recordById(patientId, recordId) {
+    const r = this.state.records.find(
+      (x) => (x.patientId === patientId || x.patient_id === patientId) && x.id === recordId
+    );
+    return normalizeRecord(r);
+  }
+  async addRecord(x) {
+    const entry = normalizeRecord(x);
+    this.state.records.push(entry);
+    this.save();
+    return entry;
+  }
+  async addAudit(x) {
+    const entry = normalizeAudit({
+      ...x,
+      timestamp: x.timestamp || new Date().toISOString(),
+      createdAt: x.createdAt || x.timestamp || new Date().toISOString(),
+    });
+    this.state.audit.push(entry);
+    this.save();
+    return entry;
+  }
+  async auditForPatient(id) {
+    return this.state.audit
+      .filter((x) => x.patientId === id || x.patient_id === id)
+      .sort((a, b) => new Date(b.timestamp || b.createdAt || b.created_at) - new Date(a.timestamp || a.createdAt || a.created_at))
+      .map(normalizeAudit);
+  }
+  async recentAudits(limit = 50) {
+    return this.state.audit
+      .slice()
+      .sort((a, b) => new Date(b.timestamp || b.createdAt || b.created_at) - new Date(a.timestamp || a.createdAt || a.created_at))
+      .slice(0, limit)
+      .map(normalizeAudit);
+  }
+  async auditById(id) {
+    const r = this.state.audit.find((x) => x.id === id);
+    if (!r) return null;
+    return normalizeAudit(r);
+  }
+  async providerByWallet(w) {
+    return normalizeProvider(
+      this.state.providers.find(
+        (x) => x.wallet.toLowerCase() === w.toLowerCase()
+      )
+    );
+  }
+  async providerById(id) {
+    return normalizeProvider(this.state.providers.find((x) => x.id === id));
+  }
+  async providers(status) {
+    return this.state.providers
+      .filter((x) => !status || x.status === status)
+      .sort((a, b) => new Date(b.createdAt || b.created_at) - new Date(a.createdAt || a.created_at))
+      .map(normalizeProvider);
+  }
+  async addProvider(x) {
+    const entry = normalizeProvider({ ...x, wallet: canonicalizeWallet(x.wallet) });
+    this.state.providers.push(entry);
+    this.save();
+    return entry;
+  }
+  async grantConsent(x) {
+    this.state.consents = this.state.consents || [];
+    const e = this.state.consents.find(
+      (v) => (v.patientId === x.patientId || v.patient_id === x.patientId) && (v.providerId === x.providerId || v.provider_id === x.providerId)
+    );
+    if (e) {
+      Object.assign(e, x, { status: "active", revokedAt: null });
+    } else {
+      this.state.consents.push({ ...x, status: "active" });
+    }
+    this.save();
+    return normalizeConsent(e || x);
+  }
+  async revokeConsent(patientId, providerId) {
+    const x = (this.state.consents || []).find(
+      (v) =>
+        (v.patientId === patientId || v.patient_id === patientId) &&
+        (v.providerId === providerId || v.provider_id === providerId) &&
+        v.status === "active"
+    );
+    if (!x) return null;
+    x.status = "revoked";
+    x.revokedAt = new Date().toISOString();
+    this.save();
+    return normalizeConsent(x);
+  }
+  async hasActiveConsent(patientId, providerId, scope) {
+    const x = (this.state.consents || []).find(
+      (v) =>
+        (v.patientId === patientId || v.patient_id === patientId) &&
+        (v.providerId === providerId || v.provider_id === providerId) &&
+        v.status === "active"
+    );
+    return !!x && Array.isArray(x.scope) && x.scope.includes(scope);
+  }
+  async consentsForPatient(id) {
+    return (this.state.consents || [])
+      .filter((v) => v.patientId === id || v.patient_id === id)
+      .map((v) => {
+        const p = this.state.providers.find((x) => x.id === (v.providerId || v.provider_id));
+        return normalizeConsent({
+          ...v,
+          provider_wallet: p?.wallet,
+          provider_name: p?.name,
+          provider_specialty: p?.specialty,
+        });
+      });
+  }
+  async consentsForProvider(providerId) {
+    return (this.state.consents || [])
+      .filter((v) => (v.providerId === providerId || v.provider_id === providerId) && v.status === "active")
+      .map((v) => {
+        const pt = this.state.patients.find((x) => x.id === (v.patientId || v.patient_id));
+        return normalizeConsent({
+          ...v,
+          patient_wallet: pt?.wallet,
+          patient_profile: pt?.profile,
+        });
+      });
+  }
+  async updateProvider(w, p) {
+    const index = this.state.providers.findIndex((x) => x.wallet.toLowerCase() === w.toLowerCase());
+    if (index === -1) return null;
+    const x = this.state.providers[index];
+    Object.assign(x, p);
+    this.save();
+    return normalizeProvider(x);
+  }
+  save(itemToUpdate) {
+    fs.mkdirSync(path.dirname(this.file), { recursive: true });
+    if (itemToUpdate && itemToUpdate.id) {
+      const auditIdx = this.state.audit.findIndex((a) => a.id === itemToUpdate.id);
+      if (auditIdx !== -1) {
+        this.state.audit[auditIdx] = { ...this.state.audit[auditIdx], ...itemToUpdate };
+      }
+    }
+    const t = this.file + ".tmp";
+    fs.writeFileSync(t, JSON.stringify(this.state, null, 2));
+    fs.renameSync(t, this.file);
+    return itemToUpdate;
+  }
+}
+async function createStore() {
+  const pool = createPool();
+  if (!pool) {
+    if (
+      process.env.NODE_ENV === "production" &&
+      process.env.ALLOW_INSECURE_LOCAL_STORE !== "true"
+    ) {
+      throw new Error(
+        "DATABASE_URL is missing. Insecure local JsonStore is disabled in production unless ALLOW_INSECURE_LOCAL_STORE=true is set."
+      );
+    }
+    return new JsonStore();
+  }
+  try {
+    await pool.query("SELECT 1");
+    return new PostgresStore(pool);
+  } catch (err) {
+    if (process.env.NODE_ENV === "production" || process.env.ALLOW_INSECURE_LOCAL_STORE !== "true") {
+      throw new Error(`PostgreSQL database connection failed in secure environment: ${err.message}`);
+    }
+    console.error("Warning: PostgreSQL database connection failed, falling back to JsonStore:", err.message);
+    return new JsonStore();
+  }
+}
+module.exports = {
+  createStore,
+  PostgresStore,
+  JsonStore,
+  canonicalizeWallet,
+  normalizePatient,
+  normalizeProvider,
+  normalizeRecord,
+  normalizeAudit,
+  normalizeConsent,
+};
+````

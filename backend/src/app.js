@@ -16,6 +16,7 @@ const { createDoctorController } = require("./controllers/doctorController");
 const { createRecordController } = require("./controllers/recordController");
 const { createEmergencyController } = require("./controllers/emergencyController");
 const { createConsentController } = require("./controllers/consentController");
+const { createComplianceController } = require("./controllers/complianceController");
 
 const patientRoutes = require("./routes/patientRoutes");
 const doctorRoutes = require("./routes/doctorRoutes");
@@ -23,6 +24,7 @@ const recordRoutes = require("./routes/recordRoutes");
 const emergencyRoutes = require("./routes/emergencyRoutes");
 const consentRoutes = require("./routes/consentRoutes");
 const authRoutes = require("./routes/authRoutes");
+const complianceRoutes = require("./routes/complianceRoutes");
 
 async function createApp({
   store,
@@ -116,6 +118,7 @@ async function createApp({
   app.use("/api/records", recordRoutes(createRecordController(c), store));
   app.use("/api/emergency-access", emergencyRoutes(createEmergencyController(c), store));
   app.use("/api/consents", consentRoutes(createConsentController(c)));
+  app.use("/api/compliance", complianceRoutes(createComplianceController(c)));
 
   app.use((err, req, res, _next) => {
     console.error(`[Error ${req.requestId}]`, err);

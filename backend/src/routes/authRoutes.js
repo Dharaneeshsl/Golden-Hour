@@ -110,7 +110,7 @@ module.exports = ({ store }) => {
       }
 
       const user = { wallet, role, patientId: patient ? patient.id : null };
-      const token = jwt.sign(user, secret(), { expiresIn: "1h", issuer: "goldenhour" });
+      const token = jwt.sign(user, secret(), { expiresIn: "15m", algorithm: "HS256", issuer: "goldenhour" });
 
       res.json({ token, user });
     } catch (error) {

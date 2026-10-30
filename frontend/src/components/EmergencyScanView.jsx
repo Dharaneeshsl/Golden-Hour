@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { api, getToken } from "../api";
+import { REASON_CODES } from "../config/i18n";
 
 export default function EmergencyScanView({ initialPatientId = "" }) {
   const [patientId, setPatientId] = useState(initialPatientId);
+  const [reasonCode, setReasonCode] = useState(REASON_CODES[0]?.code || "TRAUMA_UNRESPONSIVE");
+  const [facility, setFacility] = useState("");
   const [justification, setJustification] = useState(
-    "Unconscious trauma patient requires immediate critical history"
+    ""
   );
   const [accessGrant, setAccessGrant] = useState(null);
   const [criticalData, setCriticalData] = useState(null);
@@ -39,7 +42,7 @@ export default function EmergencyScanView({ initialPatientId = "" }) {
     setError("");
     setExpired(false);
     try {
-      const access = await api.emergency({ patientId: patientId.trim(), justification });
+      const access = await api.emergency({ patientId: patientId.trim(), justification, reasonCode, facility });
       setAccessGrant(access);
     } catch (err) {
       setError(err.message || "Failed to trigger emergency break-glass access");
@@ -94,6 +97,21 @@ export default function EmergencyScanView({ initialPatientId = "" }) {
           value={patientId}
           onChange={(e) => setPatientId(e.target.value)}
           placeholder="e.g. uuid-patient-id"
+        />
+
+        <label>Clinical Reason Code</label>
+        <select value={reasonCode} onChange={(e) => setReasonCode(e.target.value)} style={{ marginBottom: "0.75rem", width: "100%", padding: "0.5rem" }}>
+          {REASON_CODES.map((r) => (
+            <option key={r.code} value={r.code}>{r.label}</option>
+          ))}
+        </select>
+
+        <label>Facility / Hospital</label>
+        <input
+          value={facility}
+          onChange={(e) => setFacility(e.target.value)}
+          placeholder="e.g. Trauma Care Center"
+          style={{ marginBottom: "0.75rem" }}
         />
 
         <label>Clinical Justification</label>

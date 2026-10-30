@@ -18,6 +18,25 @@ export default function PatientDashboard({ patientId = "", wallet = "" }) {
     medications: "",
   });
   const [busy, setBusy] = useState(false);
+  const [downloadingFhir, setDownloadingFhir] = useState(false);
+
+  const downloadFhirIPS = async () => {
+    setDownloadingFhir(true);
+    try {
+      const bundle = await api.exportFhir(patientId);
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `FHIR-IPS-${patientId}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError("FHIR export failed: " + e.message);
+    } finally {
+      setDownloadingFhir(false);
+    }
+  };
 
   const load = () => {
     if (!patientId) return;
@@ -109,7 +128,12 @@ export default function PatientDashboard({ patientId = "", wallet = "" }) {
           <p className="eyebrow">Patient Dashboard</p>
           <h2>{patient.profile?.fullName || patient.profile?.name || `Patient ${patient.id}`}</h2>
         </div>
-        <span className="verified">● Authenticated</span>
+        <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+          <button className="secondary" onClick={downloadFhirIPS} disabled={downloadingFhir} style={{ fontSize: "0.85rem", padding: "0.4rem 0.8rem" }}>
+            {downloadingFhir ? "Exporting..." : "📥 Export FHIR R4 (IPS)"}
+          </button>
+          <span className="verified">● Authenticated</span>
+        </div>
       </div>
 
       <div className="grid">

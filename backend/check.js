@@ -22,7 +22,13 @@ const files = [
   "src/routes/recordRoutes.js",
   "src/services/chainService.js",
   "src/services/ipfsService.js",
-  "src/services/encryptionService.js"
+  "src/services/encryptionService.js",
+  "src/routes/complianceRoutes.js",
+  "src/controllers/complianceController.js",
+  "src/services/notificationService.js",
+  "src/services/fhirService.js",
+  "src/services/auditChainService.js",
+  "src/services/envelopeEncryptionService.js"
 ];
 
 for (const f of files) {

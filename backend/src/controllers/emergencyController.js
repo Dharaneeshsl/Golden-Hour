@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { notificationService } = require("../services/notificationService");
 const { canonicalizeWallet } = require("../config/db");
 
 function createEmergencyController({ store, chain }) {
@@ -42,10 +43,20 @@ function createEmergencyController({ store, chain }) {
           actor: canonicalizeWallet(req.provider.wallet),
           action: "EMERGENCY_BREAK_GLASS",
           providerId: req.provider.id,
-          metadata: { scope: "CRITICAL_ONLY" },
+          metadata: { scope: "CRITICAL_ONLY", justification: justification.trim(), reasonCode: req.body.reasonCode || "TRAUMA_EMERGENCY", facility: req.body.facility || "EMERGENCY_DEPARTMENT" },
           expiresAt,
           timestamp: new Date().toISOString(),
         });
+
+        // Dispatch instant SMS/Push notification alerts (Phase 2 & 5)
+        notificationService.sendEmergencyAlert({
+          patientId,
+          patientPhone: patient.profile && patient.profile.phone,
+          emergencyContact: patient.critical && patient.critical.emergencyContact,
+          doctorName: req.provider && req.provider.name,
+          facility: req.body.facility || "Emergency Department",
+          reasonCode: req.body.reasonCode || "TRAUMA_EMERGENCY",
+        }).catch((err) => console.error("Notification warning:", err.message));
 
         // Expose access token metadata without revealing un-audited critical data
         res.json({

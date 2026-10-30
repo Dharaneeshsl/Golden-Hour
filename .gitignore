@@ -8,3 +8,5 @@ typechain-types/
 dist/
 coverage/
 *.log
+
+.repomix-output.md

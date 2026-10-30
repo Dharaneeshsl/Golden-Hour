@@ -92,11 +92,32 @@ function normalizeConsent(row) {
   };
 }
 
+function getDbSslConfig() {
+  if (process.env.DB_SSL !== "true") return undefined;
+
+  const isProduction = process.env.NODE_ENV === "production";
+  if (isProduction && !process.env.DB_CA) {
+    throw new Error("DB_CA certificate path is strictly required in production when DB_SSL is enabled");
+  }
+
+  // Reject unauthorized by default unless explicitly disabled with DB_REJECT_UNAUTHORIZED="false"
+  const rejectUnauthorized = process.env.DB_REJECT_UNAUTHORIZED !== "false";
+
+  if (process.env.DB_CA) {
+    return {
+      ca: fs.readFileSync(process.env.DB_CA).toString(),
+      rejectUnauthorized,
+    };
+  }
+
+  return { rejectUnauthorized };
+}
+
 function createPool() {
   if (!process.env.DATABASE_URL) return null;
   return new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : undefined,
+    ssl: getDbSslConfig(),
     max: Number(process.env.DB_POOL_SIZE || 10),
     idleTimeoutMillis: 10000,
     connectionTimeoutMillis: 5000,
@@ -545,6 +566,9 @@ async function createStore() {
     await pool.query("SELECT 1");
     return new PostgresStore(pool);
   } catch (err) {
+    if (process.env.NODE_ENV === "production" || process.env.ALLOW_INSECURE_LOCAL_STORE !== "true") {
+      throw new Error(`PostgreSQL database connection failed in secure environment: ${err.message}`);
+    }
     console.error("Warning: PostgreSQL database connection failed, falling back to JsonStore:", err.message);
     return new JsonStore();
   }

@@ -8,7 +8,7 @@ function requireAuth(req, res, next) {
 
   try {
     const secret = getJwtSecret();
-    const payload = jwt.verify(token, secret, { issuer: "goldenhour" });
+    const payload = jwt.verify(token, secret, { algorithms: ["HS256"], issuer: "goldenhour" });
 
     // Canonicalize wallet in user context
     const userWallet = canonicalizeWallet(payload.wallet);

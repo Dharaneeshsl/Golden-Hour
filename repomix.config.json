@@ -1,0 +1,30 @@
+{
+  "output": {
+    "filePath": "repomix-output.xml",
+    "style": "xml",
+    "removeComments": false,
+    "removeEmptyLines": true,
+    "topFilesLength": 10,
+    "showLineNumbers": false,
+    "copyToClipboard": false
+  },
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      "**/package-lock.json",
+      "**/.data/**",
+      "**/dist/**",
+      "**/artifacts/**",
+      "**/cache/**",
+      "repomix-output.*",
+      "**/.github/**",
+      "**/*.log",
+      "**/.env",
+      "**/.env.*"
+    ]
+  },
+  "security": {
+    "enableSecurityCheck": false
+  }
+}
