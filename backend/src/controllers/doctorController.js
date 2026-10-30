@@ -2,7 +2,7 @@ const crypto = require("crypto");
 const { canonicalizeWallet } = require("../config/db");
 const { asyncHandler } = require("../utils/asyncHandler");
 
-function createDoctorController({ store, chain }) {
+function createDoctorController({ store, chain, auditChain }) {
   return {
     register: asyncHandler(async (req, res) => {
       const wallet = canonicalizeWallet(req.user.wallet);
@@ -38,6 +38,14 @@ function createDoctorController({ store, chain }) {
         providerId: provider.id,
         timestamp: new Date().toISOString(),
       });
+
+      if (auditChain && auditChain.appendAuditEvent) {
+        await auditChain.appendAuditEvent({
+          actor: wallet,
+          action: "PROVIDER_REGISTERED",
+          details: { providerId: provider.id, specialty: provider.specialty },
+        });
+      }
 
       res.status(201).json(provider);
     }),
@@ -79,6 +87,13 @@ function createDoctorController({ store, chain }) {
           providerId: provider.id,
           timestamp: new Date().toISOString(),
         });
+        if (auditChain && auditChain.appendAuditEvent) {
+          await auditChain.appendAuditEvent({
+            actor: canonicalizeWallet(req.user.wallet),
+            action: "PROVIDER_VERIFIED",
+            details: { providerId: provider.id, verifiedWallet: provider.wallet },
+          });
+        }
         res.json(provider);
       } catch (e) {
         console.error("Provider chain verification error:", e);

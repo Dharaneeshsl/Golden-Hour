@@ -19,7 +19,7 @@ function canonicalJsonStringify(obj) {
   );
 }
 
-function createRecordController({ store, encryption, ipfs, chain }) {
+function createRecordController({ store, encryption, ipfs, chain, auditChain }) {
   const canRead = async (req, patient) => {
     const reqWallet = canonicalizeWallet(req.user.wallet);
     const patientWallet = canonicalizeWallet(patient.wallet);
@@ -111,6 +111,16 @@ function createRecordController({ store, encryption, ipfs, chain }) {
           metadata: { recordType, chainPatientId },
           timestamp: new Date().toISOString(),
         });
+
+        if (auditChain && auditChain.appendAuditEvent) {
+          await auditChain.appendAuditEvent({
+            id: record.id,
+            patientId,
+            actor: provider.wallet,
+            action: "RECORD_CREATED",
+            details: { recordType, chainPatientId, recordId: record.id },
+          });
+        }
 
         res.status(201).json(record);
       } catch (e) {

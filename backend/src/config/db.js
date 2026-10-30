@@ -292,7 +292,7 @@ class PostgresStore {
 
   async hasActiveConsent(patientId, providerId, scope) {
     const r = await this.query(
-      "SELECT scope FROM patient_provider_consents WHERE patient_id=$1 AND provider_id=$2 AND status='active'",
+      "SELECT scope, expires_at FROM patient_provider_consents WHERE patient_id=$1 AND provider_id=$2 AND status='active' AND (expires_at IS NULL OR expires_at > now())",
       [patientId, providerId]
     );
     return !!r.rows.find((x) => {
@@ -356,7 +356,7 @@ class PostgresStore {
   async getKeyRecord(patientId) {
     if (!isValidUuid(patientId)) return null;
     const r = await this.query(
-      "SELECT * FROM key_registry WHERE patient_id=$1 AND status != 'shredded' ORDER BY created_at DESC LIMIT 1",
+      "SELECT * FROM key_registry WHERE patient_id=$1 ORDER BY created_at DESC LIMIT 1",
       [patientId]
     );
     if (!r.rows[0]) return null;
@@ -391,7 +391,7 @@ class PostgresStore {
   async shredKeyRecord(patientId) {
     if (!isValidUuid(patientId)) return null;
     const r = await this.query(
-      "UPDATE key_registry SET status='shredded', rotated_at=now() WHERE patient_id=$1 RETURNING *",
+      "UPDATE key_registry SET status='shredded', encrypted_dek='[CRYPTO_SHREDDED_PERMANENTLY_DESTROYED]', rotated_at=now() WHERE patient_id=$1 RETURNING *",
       [patientId]
     );
     return r.rows.map((row) => ({
@@ -512,7 +512,7 @@ class JsonStore {
       providers: [],
       consents: [],
     };
-    if (fs.existsSync(file)) {
+    if (file !== ":memory:" && fs.existsSync(file)) {
       try {
         this.state = { ...this.state, ...JSON.parse(fs.readFileSync(file, "utf8")) };
       } catch (e) {
@@ -670,7 +670,12 @@ class JsonStore {
         (v.providerId === providerId || v.provider_id === providerId) &&
         v.status === "active"
     );
-    return !!x && Array.isArray(x.scope) && x.scope.includes(scope);
+    if (!x) return false;
+    const now = new Date();
+    if (x.expiresAt && new Date(x.expiresAt) <= now) return false;
+    if (x.expires_at && new Date(x.expires_at) <= now) return false;
+    const s = typeof x.scope === 'string' ? JSON.parse(x.scope) : x.scope;
+    return Array.isArray(s) && s.includes(scope);
   }
 
   async consentsForPatient(id) {
@@ -742,7 +747,7 @@ class JsonStore {
   // --- Key Registry (B2, B3) ---
   async getKeyRecord(patientId) {
     this.state.keys = this.state.keys || [];
-    const records = this.state.keys.filter((k) => k.patientId === patientId && k.status !== "shredded");
+    const records = this.state.keys.filter((k) => k.patientId === patientId);
     return records.length > 0 ? records[records.length - 1] : null;
   }
 
@@ -759,6 +764,7 @@ class JsonStore {
     const records = this.state.keys.filter((k) => k.patientId === patientId);
     for (const r of records) {
       r.status = "shredded";
+      r.encryptedDEK = "[CRYPTO_SHREDDED_PERMANENTLY_DESTROYED]";
       r.rotatedAt = new Date().toISOString();
     }
     this.save();
@@ -854,6 +860,7 @@ class JsonStore {
   }
 
   save(itemToUpdate) {
+    if (this.file === ":memory:") return itemToUpdate;
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     if (itemToUpdate && itemToUpdate.id) {
       const auditIdx = this.state.audit.findIndex((a) => a.id === itemToUpdate.id);

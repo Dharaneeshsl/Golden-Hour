@@ -20,7 +20,7 @@ function checkProviderRateLimit(providerWallet) {
   return true;
 }
 
-function createEmergencyController({ store, chain, envelopeEncryption }) {
+function createEmergencyController({ store, chain, envelopeEncryption, auditChain }) {
   const canAudit = (req, patient) =>
     req.user.role === "admin" ||
     canonicalizeWallet(patient.wallet) === canonicalizeWallet(req.user.wallet);
@@ -92,6 +92,18 @@ function createEmergencyController({ store, chain, envelopeEncryption }) {
           expiresAt,
           timestamp: new Date().toISOString(),
         });
+
+        // Persist to tamper-evident hash-chained audit log (Step 4 Audit)
+        if (auditChain && auditChain.appendAuditEvent) {
+          await auditChain.appendAuditEvent({
+            id: event.id,
+            patientId: patient.id,
+            actor: providerWallet,
+            action: "EMERGENCY_BREAK_GLASS",
+            details: { reasonCode: clinicalReason, facility: hospitalFacility, scope: "CRITICAL_ONLY" },
+            timestamp: event.timestamp,
+          });
+        }
 
         // Record break-glass event in break_glass_events for institutional review
         if (store.addBreakGlassEvent) {
@@ -170,6 +182,15 @@ function createEmergencyController({ store, chain, envelopeEncryption }) {
         metadata: { accessId: req.params.accessId },
         timestamp: new Date().toISOString(),
       });
+
+      if (auditChain && auditChain.appendAuditEvent) {
+        await auditChain.appendAuditEvent({
+          patientId: patient.id,
+          actor: requestorWallet,
+          action: "EMERGENCY_CRITICAL_VIEW",
+          details: { accessId: req.params.accessId, providerId: provider.id },
+        });
+      }
 
       res.json({
         patientId: patient.id,

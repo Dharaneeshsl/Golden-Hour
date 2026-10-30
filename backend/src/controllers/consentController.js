@@ -17,7 +17,7 @@ function validateScope(scope) {
   return scope;
 }
 
-function createConsentController({ store, chain }) {
+function createConsentController({ store, chain, auditChain }) {
   return {
     grant: asyncHandler(async (req, res) => {
       const patient = await store.patientById(req.params.patientId);
@@ -87,6 +87,16 @@ function createConsentController({ store, chain }) {
           timestamp: new Date().toISOString(),
         });
 
+        if (auditChain && auditChain.appendAuditEvent) {
+          await auditChain.appendAuditEvent({
+            id: consent.id,
+            patientId: patient.id,
+            actor: reqWallet,
+            action: "CONSENT_GRANTED",
+            details: { scope: consent.scope, purpose, expiresAt, providerId: provider.id },
+          });
+        }
+
         res.status(201).json({
           ...consent,
           providerWallet: provider.wallet,
@@ -139,6 +149,16 @@ function createConsentController({ store, chain }) {
           metadata: { providerWallet: provider.wallet },
           timestamp: new Date().toISOString(),
         });
+
+        if (auditChain && auditChain.appendAuditEvent) {
+          await auditChain.appendAuditEvent({
+            id: consent.id,
+            patientId: patient.id,
+            actor: reqWallet,
+            action: "CONSENT_REVOKED",
+            details: { providerWallet: provider.wallet, providerId: provider.id },
+          });
+        }
 
         res.json(consent);
       } catch (e) {

@@ -11,6 +11,7 @@ const { ChainService } = require("./services/chainService");
 const defaultEncryption = require("./services/encryptionService");
 const defaultIpfs = require("./services/ipfsService");
 const { EnvelopeEncryptionService } = require("./services/envelopeEncryptionService");
+const { AuditChainService } = require("./services/auditChainService");
 
 const { createPatientController } = require("./controllers/patientController");
 const { createDoctorController } = require("./controllers/doctorController");
@@ -93,7 +94,8 @@ async function createApp({
   });
 
   const envelopeEncryption = new EnvelopeEncryptionService(process.env.KMS_MASTER_KEY, store);
-  const c = { store, chain, encryption, ipfs, envelopeEncryption };
+  const auditChain = new AuditChainService(store);
+  const c = { store, chain, encryption, ipfs, envelopeEncryption, auditChain };
 
   app.get("/health", (_q, s) =>
     s.json({

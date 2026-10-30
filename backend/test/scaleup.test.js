@@ -6,7 +6,7 @@ const { toFhirPatient, toFhirAllergies, buildIPSBundle } = require("../src/servi
 const { notificationService } = require("../src/services/notificationService");
 const { createComplianceController } = require("../src/controllers/complianceController");
 
-test("Scale-Up: Envelope Encryption with per-patient DEK and AAD binding works", () => {
+test("Scale-Up: Envelope Encryption with per-patient DEK and AAD binding works", async () => {
   const patientId = "patient-uuid-scaleup-001";
   const clinicalPayload = {
     bloodGroup: "O+",
@@ -16,7 +16,7 @@ test("Scale-Up: Envelope Encryption with per-patient DEK and AAD binding works",
   };
 
   const aad = { patientId, recordId: "rec-001", version: 2 };
-  const encrypted = envelopeEncryption.encryptField(patientId, clinicalPayload, aad);
+  const encrypted = await envelopeEncryption.encryptField(patientId, clinicalPayload, aad);
 
   assert.equal(encrypted.version, 2);
   assert.equal(encrypted.algorithm, "aes-256-gcm");
@@ -25,22 +25,22 @@ test("Scale-Up: Envelope Encryption with per-patient DEK and AAD binding works",
   assert.ok(encrypted.ciphertext);
 
   // Decrypt with valid AAD
-  const decrypted = envelopeEncryption.decryptField(patientId, encrypted);
+  const decrypted = await envelopeEncryption.decryptField(patientId, encrypted);
   assert.deepEqual(decrypted, clinicalPayload);
 
   // Crypto-shredding test
-  const shredded = envelopeEncryption.cryptoShred(patientId);
+  const shredded = await envelopeEncryption.cryptoShred(patientId);
   assert.equal(shredded, true);
 
   // Verify that subsequent decryption is mathematically impossible
-  assert.throws(
-    () => envelopeEncryption.decryptField(patientId, encrypted),
+  await assert.rejects(
+    async () => await envelopeEncryption.decryptField(patientId, encrypted),
     /Crypto-shredded/
   );
 });
 
-test("Scale-Up: Hash-chained audit log maintains tamper-evidence and generates Merkle root", () => {
-  const event1 = auditChain.appendAuditEvent({
+test("Scale-Up: Hash-chained audit log maintains tamper-evidence and generates Merkle root", async () => {
+  const event1 = await auditChain.appendAuditEvent({
     id: "audit-001",
     patientId: "p-001",
     actor: "0xDoctorWallet1",
@@ -48,7 +48,7 @@ test("Scale-Up: Hash-chained audit log maintains tamper-evidence and generates M
     details: { reasonCode: "UNCONSCIOUS_TRAUMA" },
   });
 
-  const event2 = auditChain.appendAuditEvent({
+  const event2 = await auditChain.appendAuditEvent({
     id: "audit-002",
     patientId: "p-001",
     actor: "0xDoctorWallet1",
@@ -59,11 +59,11 @@ test("Scale-Up: Hash-chained audit log maintains tamper-evidence and generates M
   assert.ok(event1.currentHash);
   assert.equal(event2.previousHash, event1.currentHash);
 
-  const integrityCheck = auditChain.verifyChainIntegrity();
+  const integrityCheck = await auditChain.verifyChainIntegrity();
   assert.equal(integrityCheck.valid, true);
 
   // Generate 32-byte Merkle Root for blockchain anchoring
-  const merkleRoot = auditChain.generateMerkleRoot();
+  const merkleRoot = await auditChain.generateMerkleRoot();
   assert.ok(merkleRoot);
   assert.equal(merkleRoot.length, 64); // 32-byte hex string
 });

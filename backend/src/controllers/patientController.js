@@ -6,7 +6,7 @@ function validObject(value) {
   return value && typeof value === "object" && !Array.isArray(value);
 }
 
-function createPatientController({ store, chain }) {
+function createPatientController({ store, chain, auditChain }) {
   const owned = async (req, res, id) => {
     const patient = await store.patientById(id);
     if (!patient) {
@@ -59,6 +59,15 @@ function createPatientController({ store, chain }) {
           timestamp: new Date().toISOString(),
         });
 
+        if (auditChain && auditChain.appendAuditEvent) {
+          await auditChain.appendAuditEvent({
+            patientId: patient.id,
+            actor: wallet,
+            action: "PATIENT_REGISTERED",
+            details: { chainPatientId },
+          });
+        }
+
         res.status(201).json({ ...patient, chainPatientId });
       } catch (e) {
         console.error("Patient creation error:", e);
@@ -105,6 +114,15 @@ function createPatientController({ store, chain }) {
           metadata: { updatedFields: Object.keys(req.body || {}) },
           timestamp: new Date().toISOString(),
         });
+
+        if (auditChain && auditChain.appendAuditEvent) {
+          await auditChain.appendAuditEvent({
+            patientId: patient.id,
+            actor: canonicalizeWallet(req.user.wallet),
+            action: "PATIENT_PROFILE_UPDATED",
+            details: { updatedFields: Object.keys(req.body || {}) },
+          });
+        }
 
         res.json(updated);
       } catch (e) {

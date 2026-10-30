@@ -28,7 +28,7 @@ function authHeader(wallet, role, sessionId = null) {
 }
 
 test("B5: Admin PHI access is blocked - admin cannot decrypt clinical records", async () => {
-  const store = new JsonStore();
+  const store = new JsonStore(":memory:");
   const app = await createApp({ store, chain: { enabled: false } });
 
   // Register patient
@@ -82,7 +82,7 @@ test("B5: Admin PHI access is blocked - admin cannot decrypt clinical records", 
 });
 
 test("B7: Break-glass review queue and emergency rate limits work", async () => {
-  const store = new JsonStore();
+  const store = new JsonStore(":memory:");
   const app = await createApp({ store, chain: { enabled: false } });
 
   const patient = await store.addPatient({
@@ -135,7 +135,7 @@ test("B7: Break-glass review queue and emergency rate limits work", async () => 
 });
 
 test("B17: Consent expiration and purpose validation work", async () => {
-  const store = new JsonStore();
+  const store = new JsonStore(":memory:");
   const app = await createApp({ store, chain: { enabled: false } });
 
   const patient = await store.addPatient({
@@ -180,7 +180,7 @@ test("B17: Consent expiration and purpose validation work", async () => {
 });
 
 test("B10 & B11: SIWE, Session tracking, and Server-side Revocation work", async () => {
-  const store = new JsonStore();
+  const store = new JsonStore(":memory:");
   const app = await createApp({ store, chain: { enabled: false } });
 
   // Generate wallet for signature
@@ -237,14 +237,14 @@ test("B10 & B11: SIWE, Session tracking, and Server-side Revocation work", async
 });
 
 test("Step 4: Persistent Envelope Encryption with Key Registry and Crypto-Shredding", async () => {
-  const store = new JsonStore();
+  const store = new JsonStore(":memory:");
   const service = new EnvelopeEncryptionService(undefined, store);
-  const patientId = "patient-registry-001";
+  const patientId = crypto.randomUUID();
 
   const data = { diagnosis: "Fracture", medication: ["Ibuprofen"] };
   const aad = { patientId, recordId: "rec-reg-001", version: 2 };
 
-  const encrypted = service.encryptField(patientId, data, aad);
+  const encrypted = await service.encryptField(patientId, data, aad);
   assert.equal(encrypted.version, 2);
 
   // Verify key record persisted in store
@@ -254,31 +254,36 @@ test("Step 4: Persistent Envelope Encryption with Key Registry and Crypto-Shredd
   assert.equal(storedKey.status, "active");
 
   // Decrypt works
-  const decrypted = service.decryptField(patientId, encrypted);
+  const decrypted = await service.decryptField(patientId, encrypted);
   assert.deepEqual(decrypted, data);
 
   // Crypto-shredding
-  service.cryptoShred(patientId);
+  await service.cryptoShred(patientId);
   const shreddedKey = await store.getKeyRecord(patientId);
-  assert.equal(shreddedKey, null); // active key is no longer returned
+  assert.ok(shreddedKey);
+  assert.equal(shreddedKey.status, "shredded");
+  assert.match(shreddedKey.encryptedDEK, /CRYPTO_SHREDDED/);
 
-  assert.throws(() => service.decryptField(patientId, encrypted), /Crypto-shredded/);
+  await assert.rejects(
+    async () => await service.decryptField(patientId, encrypted),
+    /Crypto-shredded/
+  );
 });
 
 test("Step 4: AuditChainService connects with store and verifies hash chain", async () => {
-  const store = new JsonStore();
+  const store = new JsonStore(":memory:");
   const audit = new AuditChainService(store);
 
-  const event1 = audit.appendAuditEvent({
+  const event1 = await audit.appendAuditEvent({
     id: "evt-001",
-    patientId: "p-audit-001",
+    patientId: crypto.randomUUID(),
     actor: doctorWallet,
     action: "RECORD_CREATED",
     details: { type: "Lab" },
   });
   assert.ok(event1.currentHash);
 
-  const event2 = audit.appendAuditEvent({
+  const event2 = await audit.appendAuditEvent({
     id: "evt-002",
     patientId: "p-audit-001",
     actor: doctorWallet,
@@ -287,16 +292,16 @@ test("Step 4: AuditChainService connects with store and verifies hash chain", as
   });
   assert.equal(event2.previousHash, event1.currentHash);
 
-  const integrity = audit.verifyChainIntegrity();
+  const integrity = await audit.verifyChainIntegrity();
   assert.equal(integrity.valid, true);
 
-  const merkleRoot = audit.generateMerkleRoot();
+  const merkleRoot = await audit.generateMerkleRoot();
   assert.ok(merkleRoot);
   assert.equal(merkleRoot.length, 64);
 });
 
 test("B13: Transactional Outbox enqueues and reconciles tasks", async () => {
-  const store = new JsonStore();
+  const store = new JsonStore(":memory:");
   const outbox = new OutboxService(store);
 
   const item = await outbox.enqueue("SMS_NOTIFICATION", {
