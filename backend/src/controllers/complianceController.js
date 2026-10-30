@@ -79,6 +79,18 @@ function createComplianceController({ store }) {
           createdAt: new Date().toISOString(),
         };
 
+        // If PostgresStore with data_subject_requests table, persist directly
+        if (store.query) {
+          try {
+            await store.query(
+              "INSERT INTO data_subject_requests (id, patient_id, request_type, details, status, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+              [dsrRecord.id, patientId, requestType, dsrRecord.details, dsrRecord.status, dsrRecord.createdAt]
+            );
+          } catch (e) {
+            console.warn("Could not insert into data_subject_requests table:", e.message);
+          }
+        }
+
         await store.addAudit({
           id: crypto.randomUUID(),
           patientId,
@@ -89,7 +101,7 @@ function createComplianceController({ store }) {
         });
 
         res.status(201).json({
-          message: "Data Subject Request successfully received and queued for statutory processing.",
+          message: `Data Subject Request recorded in audit trail under ID ${dsrRecord.id}.`,
           dsr: dsrRecord,
         });
       } catch (err) {

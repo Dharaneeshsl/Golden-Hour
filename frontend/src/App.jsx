@@ -9,7 +9,6 @@ import Login from "./pages/login";
 import WalletConnectButton from "./components/WalletConnectButton";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { fullLogoutCleanup } from "./utils/session";
-import { isDemoWallet } from "./config/demoAccounts";
 
 function Home({ user }) {
   return (
@@ -113,7 +112,6 @@ export default function App() {
 
     const handleAccountsChanged = (accounts) => {
       if (!user || loggingOutRef.current) return;
-      if (isDemoWallet(user.wallet)) return;
       if (!accounts || accounts.length === 0) {
         if (Date.now() < ignoreEmptyAccountsUntil.current) return;
         logout();

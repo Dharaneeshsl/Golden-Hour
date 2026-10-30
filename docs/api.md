@@ -1,35 +1,49 @@
-# API notes
+# GoldenHour API Reference
 
-All routes except `GET /health` and nonce/verification endpoints require a bearer JWT. JWTs expire after one hour. Wallets in `ADMIN_WALLETS` are admins, registered providers are doctors, and other authenticated wallets are patients. Provider status is checked live for clinical authorization.
+All protected routes require an `Authorization: Bearer <token>` header. Bearer tokens expire after 15 minutes. Wallets configured in `ADMIN_WALLETS` are granted administrative oversight, registered and verified healthcare providers hold clinician permissions, and all other authenticated wallets interact as patients. Healthcare provider verification status is verified dynamically on every clinical request.
 
-| Method | Endpoint | Role | Purpose |
+## Authentication & Authorization Model
+
+1. **Authentication Flow:** Clients request a single-use cryptographic challenge via `GET /api/auth/nonce/:wallet`. The client signs the nonce message using standard EIP-191 personal signing (`eth_sign` / MetaMask). The signature is posted to `POST /api/auth/verify`, which validates the signer on the backend and issues a 15-minute HS256 JWT.
+2. **Role Dynamic Evaluation:** Provider status is queried live from the database (`pending`, `verified`, `suspended`). Suspended or pending providers are denied clinical access even if holding an unexpired token.
+
+---
+
+## Complete Route Endpoint Directory
+
+| Method | Endpoint | Authorized Role | Purpose & Description |
 |---|---|---|---|
-| `GET` | `/health` | Public | API and chain-relay status. |
-| `GET` | `/api/auth/nonce/:wallet` | Public | Five-minute wallet-signature challenge. |
-| `POST` | `/api/auth/verify` | Public | Verifies the signed challenge and issues a JWT. |
-| `POST` | `/api/patients` | Authenticated | Registers the wallet's profile and critical data; synchronizes `PatientRegistry` when chain relay is configured. |
-| `GET` | `/api/patients/me` | Authenticated | Resolves the signed-in wallet's patient identifier. |
-| `GET` | `/api/patients/:id` | Patient/Admin | Returns patient profile, record metadata, and audit events. |
-| `POST` | `/api/records` | Verified Doctor | Requires active consent, encrypts clinical data, stores it on IPFS, persists metadata, and synchronizes `MedicalRecord` when configured. |
-| `GET` | `/api/records/:patientId` | Patient / Consented Doctor / Admin | Lists record metadata. |
-| `GET` | `/api/records/:patientId/:recordId` | Patient / Consented Doctor / Admin | Fetches and decrypts the encrypted clinical payload after authorization. |
-| `POST` | `/api/emergency-access` | Verified Doctor | Creates a 15-minute break-glass grant and synchronizes the emergency event on-chain when configured. |
-| `GET` | `/api/emergency-access/critical/:accessId` | Emergency Actor / Admin | Returns critical-only data while the 15-minute grant is valid; expired access returns `410`. |
-| `GET` | `/api/emergency-access/:patientId` | Patient / Admin | Lists emergency audit events. |
-| `GET` | `/api/doctors/access` | Authenticated | Returns provider status and permissions. |
-| `GET` | `/api/doctors?status=pending` | Admin | Lists providers awaiting verification. |
-| `POST` | `/api/doctors/:wallet/verify` | Admin | Verifies a provider and synchronizes on-chain provider status when configured. |
+| `GET` | `/health` | Public | Service health and optional blockchain-relay readiness probe. |
+| `GET` | `/ready` | Public | Database readiness and schema migration status check. |
+| `GET` | `/api/auth/nonce/:wallet` | Public | Issues a single-use 5-minute cryptographic authentication nonce. |
+| `POST` | `/api/auth/verify` | Public | Verifies the EIP-191 signature and issues a 15-minute JWT. |
+| `GET` | `/api/patients/me` | Authenticated | Resolves the authenticated caller's patient record and ID. |
+| `GET` | `/api/patients/:id` | Patient / Admin | Returns patient profile, record metadata, and audit events. |
+| `GET` | `/api/patients/all` | Admin | Administrative listing of registered patient records. |
+| `POST` | `/api/patients` | Authenticated | Registers emergency profile and critical triage medical data. |
+| `PUT` | `/api/patients/:id` | Patient | Updates patient profile and critical triage data. |
+| `GET` | `/api/records/:patientId` | Patient / Consented Doctor / Admin | Lists medical record timeline metadata. |
+| `GET` | `/api/records/:patientId/:recordId` | Patient / Consented Doctor / Admin | Fetches and decrypts the encrypted clinical record payload. |
+| `POST` | `/api/records` | Verified Doctor | Uploads encrypted record with active patient consent. |
+| `POST` | `/api/emergency-access` | Verified Doctor | Initiates time-bounded 15-minute emergency break-glass access. |
+| `GET` | `/api/emergency-access/critical/:accessId` | Emergency Actor / Admin | Retrieves critical life-saving context during the active 15-minute window (returns 410 when expired). |
+| `GET` | `/api/emergency-access/:patientId` | Patient / Admin | Lists emergency audit log events for the specified patient. |
+| `GET` | `/api/emergency-access/recent/all` | Admin | Administrative query of recent emergency break-glass sessions. |
+| `GET` | `/api/doctors/access` | Authenticated | Returns provider registration and verification status. |
+| `POST` | `/api/doctors/register` | Authenticated | Registers a clinician profile for administrative verification. |
+| `GET` | `/api/doctors` | Admin | Lists provider profiles (supports optional `?status=pending` filter). |
+| `PATCH` | `/api/doctors/:wallet/status` | Admin | Approves (`verified`) or revokes (`suspended`) clinician access. |
+| `GET` | `/api/consents/:patientId` | Patient / Admin | Lists active and historical consent grants for a patient. |
+| `GET` | `/api/consents/provider` | Verified Doctor | Lists active patient consent grants assigned to the caller. |
+| `POST` | `/api/consents/:patientId` | Patient | Grants scoped clinical record access to a verified clinician. |
+| `POST` | `/api/consents/:patientId/revoke` | Patient | Revokes previously granted clinician access immediately. |
+| `GET` | `/api/compliance/export/:patientId` | Patient | Generates and exports an HL7 FHIR R4 International Patient Summary (IPS) bundle (strictly restricted to the patient). |
+| `POST` | `/api/compliance/dsr` | Patient | Records statutory Data Subject Requests (access, correction, grievance) in the patient audit trail. |
 
-## Consent
+---
 
-Patients grant/revoke consent through the consent endpoints. Administrators have read-only oversight through `GET /api/consents/:patientId`. Consent responses include `providerWallet`, `providerName`, and `providerSpecialty`, so clients can revoke using the real provider wallet. When chain relay integration is configured, grant/revoke is synchronized to `AccessControl`.
+## Clinical Data Security & Audit Architecture
 
-## Storage and encryption
-
-The default local store is `.data/goldenhour.json`; `DATA_FILE` can override it. Production deployments should use a durable database and secure key management. Clinical data uses AES-256-GCM before IPFS persistence. The record-detail endpoint decrypts only after patient, consented verified-provider, or admin authorization.
-
-## Chain integration
-
-Chain integration is implemented as a trusted backend relay. `PatientRegistry`, `AccessControl`, `MedicalRecord`, and `EmergencyAccess` expose explicit relay operations while retaining direct wallet operations. Deploy with the updated `scripts/deploy.js` and configure `RPC_URL`, `BACKEND_PRIVATE_KEY`, `REGISTRY_ADDRESS`, `ACCESS_CONTROL_ADDRESS`, `RECORDS_ADDRESS`, `AUDIT_ADDRESS`, and `EMERGENCY_ADDRESS`. The backend signer must have the required contract permissions. Without this configuration, the API intentionally remains usable in local/off-chain mode.
-
-The frontend `useContract` helper remains available for direct wallet interaction, but patient registration is coordinated through the authenticated API flow so the backend can keep database and chain state aligned. After provider verification, an already-issued JWT retains its original role claim until it expires or the user signs in again; live provider-status checks still govern clinical access.
+1. **Storage Tier:** In development, an offline JSON store is supported. In production, PostgreSQL with advisory migration locking and mandatory TLS/CA certificate verification is required.
+2. **Off-Chain Encryption:** Sensitive clinical payloads are encrypted off-chain using AES-256-GCM prior to storage. No unencrypted clinical data is ever stored on-chain or on decentralized IPFS gateways.
+3. **Emergency Audit Trail:** Every break-glass initiation and critical view event is permanently captured in the patient's audit log, including clinical justification, standardized trauma reason codes, timestamp, and facility identification.

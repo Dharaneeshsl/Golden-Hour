@@ -353,6 +353,7 @@ class JsonStore {
   }
 
   async patientByWallet(w) {
+    if (!w) return null;
     return normalizePatient(
       this.state.patients.find(
         (x) => x.wallet.toLowerCase() === w.toLowerCase()
@@ -435,6 +436,7 @@ class JsonStore {
   }
 
   async providerByWallet(w) {
+    if (!w) return null;
     return normalizeProvider(
       this.state.providers.find(
         (x) => x.wallet.toLowerCase() === w.toLowerCase()

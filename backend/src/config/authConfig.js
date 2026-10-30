@@ -1,25 +1,34 @@
 const { canonicalizeWallet } = require("./db");
 
+const INVALID_PLACEHOLDERS = [
+  "local-development-secret",
+  "replace-with-a-long-random-secret",
+  "your-secret-key-here",
+  "local-development-secret-fallback-dev-only",
+  "dev-only-change-me-in-production-please",
+];
+
 function getJwtSecret() {
   const value = process.env.JWT_SECRET;
-  const invalidPlaceholders = [
-    "local-development-secret",
-    "replace-with-a-long-random-secret",
-    "your-secret-key-here",
-  ];
-  if (!value || invalidPlaceholders.includes(value)) {
+  if (!value) {
     if (process.env.NODE_ENV === "production") {
-      throw new Error("A strong, non-placeholder JWT_SECRET must be configured in production");
+      throw new Error("JWT_SECRET must be configured in environment");
     }
-    return value || "local-development-secret-fallback-dev-only";
+    return "dev-non-production-fallback-key-32-chars-long";
   }
+
+  if (INVALID_PLACEHOLDERS.includes(value)) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("Weak or placeholder JWT_SECRET is strictly forbidden in production");
+    }
+  }
+
+  if (process.env.NODE_ENV === "production" && value.length < 32) {
+    throw new Error("JWT_SECRET must be at least 32 characters in production");
+  }
+
   return value;
 }
-
-const DEFAULT_DEMO_ADMINS = [
-  "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-  "0xeF4C5fa4f9b9fFD908d5b422Dd1C3eEd3D9F749c",
-];
 
 function getAdminWallets() {
   const raw = (process.env.ADMIN_WALLETS || "")
@@ -27,9 +36,6 @@ function getAdminWallets() {
     .map((x) => x.trim())
     .filter(Boolean);
 
-  if (raw.length === 0 && process.env.NODE_ENV !== "production") {
-    return DEFAULT_DEMO_ADMINS.map(canonicalizeWallet);
-  }
   return raw.map(canonicalizeWallet);
 }
 
@@ -43,4 +49,5 @@ module.exports = {
   getJwtSecret,
   getAdminWallets,
   isCurrentAdmin,
+  INVALID_PLACEHOLDERS,
 };

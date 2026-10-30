@@ -1,4 +1,4 @@
-process.env.JWT_SECRET = "test-secret";
+process.env.JWT_SECRET = "test-secret-32-chars-long-security-key";
 process.env.ADMIN_WALLETS = "0x0000000000000000000000000000000000000003,0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 
 const os = require("os");

@@ -25,6 +25,7 @@ const emergencyRoutes = require("./routes/emergencyRoutes");
 const consentRoutes = require("./routes/consentRoutes");
 const authRoutes = require("./routes/authRoutes");
 const complianceRoutes = require("./routes/complianceRoutes");
+const { validateStartupConfig } = require("./config/validateConfig");
 
 async function createApp({
   store,
@@ -32,6 +33,7 @@ async function createApp({
   encryption = defaultEncryption,
   ipfs = defaultIpfs,
 } = {}) {
+  validateStartupConfig();
   store = store || (await createStore());
   const app = express();
   app.disable("x-powered-by");

@@ -16,7 +16,8 @@
     "backend": "npm --prefix backend run dev",
     "frontend": "npm --prefix frontend run dev",
     "install:all": "npm install && npm --prefix backend install && npm --prefix frontend install",
-    "check": "npm run compile && npm test && npm --prefix backend run check && npm --prefix backend test && npm --prefix frontend run build && npm --prefix frontend test"
+    "scan:secrets": "node scripts/ciSecretScan.js",
+    "check": "node scripts/ciSecretScan.js && npm run compile && npm test && npm --prefix backend run check && npm --prefix backend test && npm --prefix frontend run build && npm --prefix frontend test"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",

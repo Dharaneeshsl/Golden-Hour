@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ethers } from "ethers";
 import { api, setToken } from "../api";
-import { DEMO_ACCOUNTS } from "../config/demoAccounts";
 
 export default function Login({ onLogin }) {
   const navigate = useNavigate();
@@ -103,16 +102,6 @@ export default function Login({ onLogin }) {
       console.warn("Account switch cancelled", e);
     }
   };
-
-  const submitDemoAccount = async (role) => {
-    const acc = DEMO_ACCOUNTS[role];
-    if (!acc) return;
-
-    await authenticateWithSigner(acc.wallet, async () => {
-      return `DEMO_SIGNATURE_${acc.wallet}`;
-    });
-  };
-
   return (
     <section className="dashboard">
       <div className="panel login-panel">
@@ -140,36 +129,6 @@ export default function Login({ onLogin }) {
               title="Switch active MetaMask account"
             >
               🔄 Switch Account
-            </button>
-          </div>
-        </div>
-
-        <div style={{ borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: "1.25rem", marginTop: "1rem" }}>
-          <p className="eyebrow">Instant Demo Sign-In (No Extension Required)</p>
-          <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
-            <button
-              className="secondary"
-              style={{ flex: 1, fontSize: "0.85rem" }}
-              disabled={busy}
-              onClick={() => submitDemoAccount("admin")}
-            >
-              🔑 Demo Admin (Acc 1)
-            </button>
-            <button
-              className="secondary"
-              style={{ flex: 1, fontSize: "0.85rem" }}
-              disabled={busy}
-              onClick={() => submitDemoAccount("doctor")}
-            >
-              🩺 Demo Provider (Acc 2)
-            </button>
-            <button
-              className="secondary"
-              style={{ flex: 1, fontSize: "0.85rem" }}
-              disabled={busy}
-              onClick={() => submitDemoAccount("patient")}
-            >
-              👤 Demo Patient (Acc 3)
             </button>
           </div>
         </div>

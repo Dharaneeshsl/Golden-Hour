@@ -2,7 +2,7 @@
 
 > **Privacy-First Emergency Medical Information Access System with Web3 Wallet Auth, Patient Consent Control, AES-256-GCM Encryption, PostgreSQL Persistence, and Ethereum Blockchain Auditability.**
 
-GoldenHour is a production-grade healthcare technology platform demonstrating how critical medical data can be accessed instantly in life-threatening emergencies **without sacrificing patient privacy or data sovereignty**.
+GoldenHour is a reference implementation and engineering platform demonstrating how critical medical data can be accessed instantly in life-threatening emergencies **without sacrificing patient privacy or data sovereignty**. It is currently executing a disciplined multi-step security and architectural scale-up roadmap.
 
 ---
 

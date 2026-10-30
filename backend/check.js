@@ -7,6 +7,7 @@ const files = [
   "src/config/migrate.js",
   "src/config/authConfig.js",
   "src/config/contractConfig.js",
+  "src/config/validateConfig.js",
   "src/controllers/patientController.js",
   "src/controllers/doctorController.js",
   "src/controllers/consentController.js",

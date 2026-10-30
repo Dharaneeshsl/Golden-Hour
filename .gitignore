@@ -9,4 +9,8 @@ dist/
 coverage/
 *.log
 
-.repomix-output.md
+# Repomix bundles
+repomix-output.xml
+repomix-output.md
+.repomix*
+*.repomix.*
