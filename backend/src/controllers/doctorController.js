@@ -1,9 +1,10 @@
 const crypto = require("crypto");
 const { canonicalizeWallet } = require("../config/db");
+const { asyncHandler } = require("../utils/asyncHandler");
 
 function createDoctorController({ store, chain }) {
   return {
-    register: async (req, res) => {
+    register: asyncHandler(async (req, res) => {
       const wallet = canonicalizeWallet(req.user.wallet);
       const { name, licenseNumber, specialty } = req.body || {};
 
@@ -39,9 +40,9 @@ function createDoctorController({ store, chain }) {
       });
 
       res.status(201).json(provider);
-    },
+    }),
 
-    access: async (req, res) => {
+    access: asyncHandler(async (req, res) => {
       const wallet = canonicalizeWallet(req.user.wallet);
       const provider = await store.providerByWallet(wallet);
       if (!provider) {
@@ -55,9 +56,9 @@ function createDoctorController({ store, chain }) {
             ? ["read", "write", "emergency-critical-only"]
             : [],
       });
-    },
+    }),
 
-    verify: async (req, res) => {
+    verify: asyncHandler(async (req, res) => {
       const targetWallet = canonicalizeWallet(req.params.wallet);
       const provider = await store.updateProvider(targetWallet, {
         status: "verified",
@@ -88,9 +89,9 @@ function createDoctorController({ store, chain }) {
         });
         res.status(502).json({ error: "Provider verification failed on chain" });
       }
-    },
+    }),
 
-    updateStatus: async (req, res) => {
+    updateStatus: asyncHandler(async (req, res) => {
       const targetWallet = canonicalizeWallet(req.params.wallet);
       const { status } = req.body || {};
       const allowed = ["pending", "verified", "suspended"];
@@ -131,11 +132,14 @@ function createDoctorController({ store, chain }) {
       });
 
       res.json(updated);
-    },
+    }),
 
-    list: async (req, res) => {
-      res.json(await store.providers(req.query.status));
-    },
+    list: asyncHandler(async (req, res) => {
+      const limit = parseInt(req.query.limit, 10) || 50;
+      const offset = parseInt(req.query.offset, 10) || 0;
+      const providers = await store.providers(req.query.status);
+      res.json(providers.slice(offset, offset + limit));
+    }),
   };
 }
 

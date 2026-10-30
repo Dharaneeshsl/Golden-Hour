@@ -7,6 +7,8 @@ module.exports = (c, store) => {
   r.post("/", requireAuth, requireVerifiedProvider(store), c.create);
   r.get("/critical/:accessId", requireAuth, c.critical);
   r.get("/recent/all", requireAuth, c.recentAudits);
+  r.get("/reviews/pending", requireAuth, c.pendingReviews);
+  r.post("/reviews/:id", requireAuth, c.submitReview);
   r.get("/:patientId", requireAuth, c.audit);
   return r;
 };

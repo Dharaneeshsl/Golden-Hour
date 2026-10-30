@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const { canonicalizeWallet } = require("../config/db");
+const { asyncHandler } = require("../utils/asyncHandler");
 
 function validObject(value) {
   return value && typeof value === "object" && !Array.isArray(value);
@@ -12,10 +13,9 @@ function createPatientController({ store, chain }) {
       res.status(404).json({ error: "Patient not found" });
       return null;
     }
-    if (
-      req.user.role !== "admin" &&
-      canonicalizeWallet(patient.wallet) !== canonicalizeWallet(req.user.wallet)
-    ) {
+    const patientWallet = canonicalizeWallet(patient.wallet);
+    const reqWallet = canonicalizeWallet(req.user.wallet);
+    if (patientWallet !== reqWallet) {
       res.status(403).json({ error: "Patient data access denied" });
       return null;
     }
@@ -23,7 +23,7 @@ function createPatientController({ store, chain }) {
   };
 
   return {
-    create: async (req, res) => {
+    create: asyncHandler(async (req, res) => {
       const wallet = canonicalizeWallet(req.user.wallet);
       const { profile, critical } = req.body || {};
 
@@ -64,9 +64,21 @@ function createPatientController({ store, chain }) {
         console.error("Patient creation error:", e);
         res.status(502).json({ error: "Patient registration failed" });
       }
-    },
+    }),
 
-    update: async (req, res) => {
+    me: asyncHandler(async (req, res) => {
+      const wallet = canonicalizeWallet(req.user.wallet);
+      const patient = await store.patientByWallet(wallet);
+      if (!patient) return res.status(404).json({ error: "Patient profile not found" });
+      res.json({
+        ...patient,
+        patientId: patient.id,
+        records: await store.recordsForPatient(patient.id),
+        audit: await store.auditForPatient(patient.id),
+      });
+    }),
+
+    update: asyncHandler(async (req, res) => {
       const patient = await owned(req, res, req.params.id);
       if (!patient) return;
 
@@ -99,38 +111,54 @@ function createPatientController({ store, chain }) {
         console.error("Patient update error:", e);
         res.status(500).json({ error: "Failed to update patient profile" });
       }
-    },
+    }),
 
-    get: async (req, res) => {
-      const patient = await owned(req, res, req.params.id);
-      if (!patient) return;
+    get: asyncHandler(async (req, res) => {
+      const patient = await store.patientById(req.params.id);
+      if (!patient) return res.status(404).json({ error: "Patient not found" });
+
+      const reqWallet = canonicalizeWallet(req.user.wallet);
+      const patientWallet = canonicalizeWallet(patient.wallet);
+
+      // B5: System Admin has audit oversight but clinical PHI is redacted
+      if (req.user.role === "admin") {
+        return res.json({
+          id: patient.id,
+          wallet: patient.wallet,
+          createdAt: patient.createdAt,
+          records: [],
+          audit: await store.auditForPatient(patient.id),
+        });
+      }
+
+      if (patientWallet !== reqWallet) {
+        return res.status(403).json({ error: "Patient data access denied" });
+      }
 
       res.json({
         ...patient,
         records: await store.recordsForPatient(patient.id),
         audit: await store.auditForPatient(patient.id),
       });
-    },
+    }),
 
-    listAll: async (req, res) => {
+    listAll: asyncHandler(async (req, res) => {
       if (req.user.role !== "admin") {
         return res.status(403).json({ error: "Admin authorization required" });
       }
+      const limit = parseInt(req.query.limit, 10) || 50;
+      const offset = parseInt(req.query.offset, 10) || 0;
       const patients = await store.allPatients();
-      res.json(patients);
-    },
-
-    me: async (req, res) => {
-      const wallet = canonicalizeWallet(req.user.wallet);
-      const patient = await store.patientByWallet(wallet);
-      if (!patient) {
-        return res.status(404).json({
-          error: "Patient not registered",
-          code: "PATIENT_NOT_REGISTERED",
-        });
-      }
-      res.json({ patientId: patient.id, patient });
-    },
+      
+      // B5: Redact clinical PHI from bulk administration listing
+      const sanitized = patients.slice(offset, offset + limit).map((p) => ({
+        id: p.id,
+        wallet: p.wallet,
+        createdAt: p.createdAt,
+        hasCriticalData: !!(p.critical && Object.keys(p.critical).length > 0),
+      }));
+      res.json(sanitized);
+    }),
   };
 }
 

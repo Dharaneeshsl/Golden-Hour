@@ -4,14 +4,20 @@ const crypto = require("crypto");
  * Hash-Chained Audit & Merkle Root Anchoring Service
  * 
  * - Computes forward-chained SHA-256 hashes: H_n = SHA256(H_{n-1} || payload)
+ * - Persists audit events to database audit_events table
  * - Detects tampering across any historical audit record
  * - Builds Merkle trees for blockchain anchoring (Option B)
  */
 
 class AuditChainService {
-  constructor() {
+  constructor(store = null) {
     this.genesisHash = "0000000000000000000000000000000000000000000000000000000000000000";
+    this.store = store;
     this.chain = [];
+  }
+
+  setStore(store) {
+    this.store = store;
   }
 
   getLatestHash() {
@@ -41,43 +47,49 @@ class AuditChainService {
       details,
       previousHash,
       currentHash,
+      createdAt: timestamp,
       timestamp,
     };
 
+    if (this.store && this.store.addAuditEvent) {
+      Promise.resolve(this.store.addAuditEvent(entry)).catch((err) =>
+        console.warn("Audit events async save warning:", err.message)
+      );
+    }
     this.chain.push(entry);
     return entry;
   }
 
-  verifyChainIntegrity() {
-    for (let i = 0; i < this.chain.length; i++) {
-      const entry = this.chain[i];
-      const expectedPrev = i === 0 ? this.genesisHash : this.chain[i - 1].currentHash;
-      if (entry.previousHash !== expectedPrev) {
-        return { valid: false, brokenAtSequence: entry.sequenceNum, reason: "Previous hash mismatch" };
+  verifyChainIntegrity(chainToVerify = this.chain) {
+    for (let i = 0; i < chainToVerify.length; i++) {
+      const entry = chainToVerify[i];
+      const prevHash = entry.previousHash || entry.previous_hash;
+      const curHash = entry.currentHash || entry.current_hash;
+      const expectedPrev = i === 0 ? this.genesisHash : (chainToVerify[i - 1].currentHash || chainToVerify[i - 1].current_hash);
+      
+      if (prevHash !== expectedPrev) {
+        return { valid: false, brokenAtSequence: entry.sequenceNum || entry.sequence_num, reason: "Previous hash mismatch" };
       }
 
       const payload = JSON.stringify({
         id: entry.id,
-        patientId: entry.patientId,
+        patientId: entry.patientId || entry.patient_id,
         actor: entry.actor,
         action: entry.action,
         details: entry.details,
-        timestamp: entry.timestamp,
-        previousHash: entry.previousHash,
+        timestamp: entry.createdAt || entry.created_at || entry.timestamp,
+        previousHash: prevHash,
       });
 
       const recalculated = crypto.createHash("sha256").update(payload).digest("hex");
-      if (recalculated !== entry.currentHash) {
-        return { valid: false, brokenAtSequence: entry.sequenceNum, reason: "Current hash recalculation failed" };
+      if (recalculated !== curHash) {
+        return { valid: false, brokenAtSequence: entry.sequenceNum || entry.sequence_num, reason: "Current hash recalculation failed" };
       }
     }
-    return { valid: true, totalEntries: this.chain.length };
+    return { valid: true, totalEntries: chainToVerify.length };
   }
 
-  /**
-   * Generates a Merkle Root from an array of audit hashes for on-chain anchoring
-   */
-  generateMerkleRoot(hashes = this.chain.map((c) => c.currentHash)) {
+  generateMerkleRoot(hashes = this.chain.map((c) => c.currentHash || c.current_hash)) {
     if (hashes.length === 0) return this.genesisHash;
     let currentLevel = [...hashes];
 
@@ -96,7 +108,9 @@ class AuditChainService {
   }
 }
 
+const auditChain = new AuditChainService();
+
 module.exports = {
   AuditChainService,
-  auditChain: new AuditChainService(),
+  auditChain,
 };

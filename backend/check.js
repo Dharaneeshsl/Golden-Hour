@@ -1,40 +1,35 @@
 const { execSync } = require("child_process");
+const fs = require("fs");
 const path = require("path");
 
-const files = [
-  "src/app.js",
-  "src/config/db.js",
-  "src/config/migrate.js",
-  "src/config/authConfig.js",
-  "src/config/contractConfig.js",
-  "src/config/validateConfig.js",
-  "src/controllers/patientController.js",
-  "src/controllers/doctorController.js",
-  "src/controllers/consentController.js",
-  "src/controllers/recordController.js",
-  "src/controllers/emergencyController.js",
-  "src/middleware/authMiddleware.js",
-  "src/middleware/roleCheck.js",
-  "src/routes/authRoutes.js",
-  "src/routes/consentRoutes.js",
-  "src/routes/doctorRoutes.js",
-  "src/routes/emergencyRoutes.js",
-  "src/routes/patientRoutes.js",
-  "src/routes/recordRoutes.js",
-  "src/services/chainService.js",
-  "src/services/ipfsService.js",
-  "src/services/encryptionService.js",
-  "src/routes/complianceRoutes.js",
-  "src/controllers/complianceController.js",
-  "src/services/notificationService.js",
-  "src/services/fhirService.js",
-  "src/services/auditChainService.js",
-  "src/services/envelopeEncryptionService.js"
-];
-
-for (const f of files) {
-  const filePath = path.resolve(__dirname, f);
-  execSync(`"${process.execPath}" --check "${filePath}"`, { stdio: "inherit" });
+function getJsFiles(dir) {
+  let results = [];
+  const list = fs.readdirSync(dir);
+  for (const file of list) {
+    const fullPath = path.join(dir, file);
+    const stat = fs.statSync(fullPath);
+    if (stat && stat.isDirectory()) {
+      results = results.concat(getJsFiles(fullPath));
+    } else if (file.endsWith(".js") && !file.endsWith(".min.js")) {
+      results.push(fullPath);
+    }
+  }
+  return results;
 }
 
-console.log("Syntax check passed across all backend files");
+const srcDir = path.resolve(__dirname, "src");
+const testDir = path.resolve(__dirname, "test");
+const allFiles = [...getJsFiles(srcDir), ...getJsFiles(testDir)];
+
+console.log(`Auditing and syntax-checking ${allFiles.length} backend source & test files...`);
+
+for (const filePath of allFiles) {
+  try {
+    execSync(`"${process.execPath}" --check "${filePath}"`, { stdio: "pipe" });
+  } catch (err) {
+    console.error(`Syntax error in ${filePath}:`, err.message);
+    process.exit(1);
+  }
+}
+
+console.log(`Syntax check passed across all ${allFiles.length} backend files`);

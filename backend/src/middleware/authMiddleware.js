@@ -2,7 +2,7 @@ const jwt = require("jsonwebtoken");
 const { getJwtSecret, isCurrentAdmin } = require("../config/authConfig");
 const { canonicalizeWallet } = require("../config/db");
 
-function requireAuth(req, res, next) {
+async function requireAuth(req, res, next) {
   const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
   if (!token) return res.status(401).json({ error: "Authentication token required" });
 
@@ -17,6 +17,15 @@ function requireAuth(req, res, next) {
     let userRole = payload.role;
     if (userRole === "admin" && !isCurrentAdmin(userWallet)) {
       userRole = "patient";
+    }
+
+    // Check server-side session revocation if session ID is attached (B11)
+    const store = req.app ? req.app.get("store") : null;
+    if (store && payload.sessionId && store.isSessionActive) {
+      const active = await store.isSessionActive(payload.sessionId);
+      if (!active) {
+        return res.status(401).json({ error: "Session has been revoked or expired" });
+      }
     }
 
     req.user = { ...payload, wallet: userWallet, role: userRole };

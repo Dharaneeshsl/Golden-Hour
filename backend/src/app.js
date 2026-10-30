@@ -10,6 +10,7 @@ const { createStore } = require("./config/db");
 const { ChainService } = require("./services/chainService");
 const defaultEncryption = require("./services/encryptionService");
 const defaultIpfs = require("./services/ipfsService");
+const { EnvelopeEncryptionService } = require("./services/envelopeEncryptionService");
 
 const { createPatientController } = require("./controllers/patientController");
 const { createDoctorController } = require("./controllers/doctorController");
@@ -37,6 +38,7 @@ async function createApp({
   store = store || (await createStore());
   const app = express();
   app.disable("x-powered-by");
+  app.set("store", store);
 
   if (process.env.TRUST_PROXY) {
     app.set("trust proxy", process.env.TRUST_PROXY === "true" ? 1 : process.env.TRUST_PROXY);
@@ -90,7 +92,8 @@ async function createApp({
     message: { error: "Too many authentication requests, please try again later" },
   });
 
-  const c = { store, chain, encryption, ipfs };
+  const envelopeEncryption = new EnvelopeEncryptionService(process.env.KMS_MASTER_KEY, store);
+  const c = { store, chain, encryption, ipfs, envelopeEncryption };
 
   app.get("/health", (_q, s) =>
     s.json({
@@ -122,10 +125,13 @@ async function createApp({
   app.use("/api/consents", consentRoutes(createConsentController(c)));
   app.use("/api/compliance", complianceRoutes(createComplianceController(c)));
 
+  // B8: Global asynchronous error mapper
   app.use((err, req, res, _next) => {
-    console.error(`[Error ${req.requestId}]`, err);
-    res.status(500).json({
-      error: "Internal server error",
+    const status = err.status || err.statusCode || (err.name === "UnauthorizedError" ? 401 : 500);
+    const isClientError = status >= 400 && status < 500;
+    console.error(`[Error ${req.requestId}] [${status}]`, err.message || err);
+    res.status(status).json({
+      error: isClientError ? err.message : "Internal server error",
       requestId: req.requestId,
     });
   });

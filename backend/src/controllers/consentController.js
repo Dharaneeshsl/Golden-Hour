@@ -1,7 +1,9 @@
 const crypto = require("crypto");
 const { canonicalizeWallet } = require("../config/db");
+const { asyncHandler } = require("../utils/asyncHandler");
 
-const ALLOWED_SCOPES = ["records"];
+const ALLOWED_SCOPES = ["records", "profile", "critical"];
+const ALLOWED_PURPOSES = ["EMERGENCY_TREATMENT", "CONSULTATION", "SECOND_OPINION", "RESEARCH"];
 
 function validateScope(scope) {
   if (!scope) return ["records"];
@@ -17,7 +19,7 @@ function validateScope(scope) {
 
 function createConsentController({ store, chain }) {
   return {
-    grant: async (req, res) => {
+    grant: asyncHandler(async (req, res) => {
       const patient = await store.patientById(req.params.patientId);
       if (!patient) return res.status(404).json({ error: "Patient not found" });
 
@@ -44,6 +46,20 @@ function createConsentController({ store, chain }) {
         });
       }
 
+      const purpose = req.body.purpose || "EMERGENCY_TREATMENT";
+      if (!ALLOWED_PURPOSES.includes(purpose)) {
+        return res.status(400).json({
+          error: `Invalid purpose. Allowed purposes: ${ALLOWED_PURPOSES.join(", ")}`,
+        });
+      }
+
+      const expiresAt = req.body.expiresAt || null;
+      if (expiresAt && (isNaN(new Date(expiresAt).getTime()) || new Date(expiresAt) <= new Date())) {
+        return res.status(400).json({
+          error: "expiresAt must be a valid future ISO timestamp",
+        });
+      }
+
       try {
         if (chain.enabled) {
           const chainPatientId = await chain.patientId(patient.wallet);
@@ -56,6 +72,8 @@ function createConsentController({ store, chain }) {
           patientId: patient.id,
           providerId: provider.id,
           scope,
+          purpose,
+          expiresAt,
           grantedAt: new Date().toISOString(),
         });
 
@@ -65,7 +83,7 @@ function createConsentController({ store, chain }) {
           actor: reqWallet,
           action: "CONSENT_GRANTED",
           providerId: provider.id,
-          metadata: { scope: consent.scope },
+          metadata: { scope: consent.scope, purpose, expiresAt },
           timestamp: new Date().toISOString(),
         });
 
@@ -79,9 +97,9 @@ function createConsentController({ store, chain }) {
         console.error("Consent grant error:", e);
         res.status(502).json({ error: "Consent grant failed" });
       }
-    },
+    }),
 
-    revoke: async (req, res) => {
+    revoke: asyncHandler(async (req, res) => {
       const patient = await store.patientById(req.params.patientId);
       if (!patient) return res.status(404).json({ error: "Patient not found" });
 
@@ -93,18 +111,24 @@ function createConsentController({ store, chain }) {
       }
 
       const providerWallet = canonicalizeWallet(req.body.wallet);
+      if (!providerWallet) {
+        return res.status(400).json({ error: "Provider wallet address is required" });
+      }
       const provider = await store.providerByWallet(providerWallet);
       if (!provider) return res.status(404).json({ error: "Provider not found" });
 
       try {
         if (chain.enabled) {
           const chainPatientId = await chain.patientId(patient.wallet);
-          if (!chainPatientId) throw new Error("Patient is not registered on chain");
-          await chain.revokeAccess(patient.wallet, chainPatientId, provider.wallet);
+          if (chainPatientId) {
+            await chain.revokeAccess(patient.wallet, chainPatientId, provider.wallet);
+          }
         }
 
         const consent = await store.revokeConsent(patient.id, provider.id);
-        if (!consent) return res.status(404).json({ error: "Active consent not found" });
+        if (!consent) {
+          return res.status(404).json({ error: "Active consent not found" });
+        }
 
         await store.addAudit({
           id: crypto.randomUUID(),
@@ -112,22 +136,18 @@ function createConsentController({ store, chain }) {
           actor: reqWallet,
           action: "CONSENT_REVOKED",
           providerId: provider.id,
+          metadata: { providerWallet: provider.wallet },
           timestamp: new Date().toISOString(),
         });
 
-        res.json({
-          ...consent,
-          providerWallet: provider.wallet,
-          providerName: provider.name,
-          providerSpecialty: provider.specialty,
-        });
+        res.json(consent);
       } catch (e) {
-        console.error("Consent revoke error:", e);
-        res.status(502).json({ error: "Consent revoke failed" });
+        console.error("Consent revocation error:", e);
+        res.status(502).json({ error: "Consent revocation failed" });
       }
-    },
+    }),
 
-    list: async (req, res) => {
+    list: asyncHandler(async (req, res) => {
       const patient = await store.patientById(req.params.patientId);
       if (!patient) return res.status(404).json({ error: "Patient not found" });
 
@@ -135,20 +155,45 @@ function createConsentController({ store, chain }) {
       const patientWallet = canonicalizeWallet(patient.wallet);
 
       if (req.user.role !== "admin" && patientWallet !== reqWallet) {
-        return res.status(403).json({ error: "Consent access denied" });
+        return res.status(403).json({ error: "Patient consent access denied" });
       }
 
       res.json(await store.consentsForPatient(patient.id));
-    },
+    }),
 
-    listForProvider: async (req, res) => {
+    forPatient: asyncHandler(async (req, res) => {
+      const patient = await store.patientById(req.params.patientId);
+      if (!patient) return res.status(404).json({ error: "Patient not found" });
+
       const reqWallet = canonicalizeWallet(req.user.wallet);
-      const provider = await store.providerByWallet(reqWallet);
-      if (!provider || provider.status !== "verified") {
-        return res.status(403).json({ error: "Active verified provider context required" });
+      const patientWallet = canonicalizeWallet(patient.wallet);
+
+      if (req.user.role !== "admin" && patientWallet !== reqWallet) {
+        return res.status(403).json({ error: "Patient consent access denied" });
       }
+
+      res.json(await store.consentsForPatient(patient.id));
+    }),
+
+    listForProvider: asyncHandler(async (req, res) => {
+      const providerWallet = canonicalizeWallet(req.user.wallet);
+      const provider = await store.providerByWallet(providerWallet);
+      if (!provider || provider.status !== "verified") {
+        return res.status(403).json({ error: "Verified provider access required" });
+      }
+
       res.json(await store.consentsForProvider(provider.id));
-    },
+    }),
+
+    forProvider: asyncHandler(async (req, res) => {
+      const providerWallet = canonicalizeWallet(req.user.wallet);
+      const provider = await store.providerByWallet(providerWallet);
+      if (!provider || provider.status !== "verified") {
+        return res.status(403).json({ error: "Verified provider access required" });
+      }
+
+      res.json(await store.consentsForProvider(provider.id));
+    }),
   };
 }
 

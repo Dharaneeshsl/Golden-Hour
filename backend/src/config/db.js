@@ -82,6 +82,8 @@ function normalizeConsent(row) {
     providerId: row.provider_id || row.providerId,
     status: row.status,
     scope,
+    purpose: row.purpose || "EMERGENCY_TREATMENT",
+    expiresAt: row.expires_at || row.expiresAt || null,
     grantedAt: row.granted_at || row.grantedAt,
     revokedAt: row.revoked_at || row.revokedAt || null,
     providerWallet: row.provider_wallet ? canonicalizeWallet(row.provider_wallet) : (row.providerWallet ? canonicalizeWallet(row.providerWallet) : undefined),
@@ -322,6 +324,177 @@ class PostgresStore {
     );
     return normalizeProvider(r.rows[0]);
   }
+  // --- Sessions (B11) ---
+  async createSession(x) {
+    const r = await this.query(
+      "INSERT INTO sessions(id, user_id, token_hash, ip_address, user_agent, expires_at, created_at) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *",
+      [x.id, isValidUuid(x.userId) ? x.userId : null, x.tokenHash, x.ipAddress || null, x.userAgent || null, x.expiresAt, x.createdAt || new Date().toISOString()]
+    );
+    return r.rows[0];
+  }
+
+  async getSessionByHash(tokenHash) {
+    const r = await this.query("SELECT * FROM sessions WHERE token_hash=$1", [tokenHash]);
+    return r.rows[0] || null;
+  }
+
+  async revokeSession(id) {
+    const r = await this.query("UPDATE sessions SET revoked_at=now() WHERE id=$1 RETURNING *", [id]);
+    return r.rows[0] || null;
+  }
+
+  async isSessionActive(id) {
+    if (!id || !isValidUuid(id)) return false;
+    const r = await this.query("SELECT id, expires_at, revoked_at FROM sessions WHERE id=$1", [id]);
+    if (!r.rows[0]) return false;
+    const s = r.rows[0];
+    if (s.revoked_at) return false;
+    return new Date(s.expires_at) > new Date();
+  }
+
+  // --- Key Registry for KMS Envelope Encryption (B2, B3) ---
+  async getKeyRecord(patientId) {
+    if (!isValidUuid(patientId)) return null;
+    const r = await this.query(
+      "SELECT * FROM key_registry WHERE patient_id=$1 AND status != 'shredded' ORDER BY created_at DESC LIMIT 1",
+      [patientId]
+    );
+    if (!r.rows[0]) return null;
+    const row = r.rows[0];
+    return {
+      keyId: row.key_id,
+      patientId: row.patient_id,
+      algorithm: row.algorithm,
+      encryptedDEK: row.encrypted_dek,
+      status: row.status,
+      rotatedAt: row.rotated_at,
+      createdAt: row.created_at,
+    };
+  }
+
+  async saveKeyRecord(x) {
+    const r = await this.query(
+      "INSERT INTO key_registry(key_id, patient_id, algorithm, encrypted_dek, status, created_at) VALUES($1,$2,$3,$4,$5,$6) RETURNING *",
+      [x.keyId, x.patientId, x.algorithm || "aes-256-gcm", x.encryptedDEK, x.status || "active", x.createdAt || new Date().toISOString()]
+    );
+    const row = r.rows[0];
+    return {
+      keyId: row.key_id,
+      patientId: row.patient_id,
+      algorithm: row.algorithm,
+      encryptedDEK: row.encrypted_dek,
+      status: row.status,
+      createdAt: row.created_at,
+    };
+  }
+
+  async shredKeyRecord(patientId) {
+    if (!isValidUuid(patientId)) return null;
+    const r = await this.query(
+      "UPDATE key_registry SET status='shredded', rotated_at=now() WHERE patient_id=$1 RETURNING *",
+      [patientId]
+    );
+    return r.rows.map((row) => ({
+      keyId: row.key_id,
+      patientId: row.patient_id,
+      status: row.status,
+    }));
+  }
+
+  // --- Break-Glass Events & Post-Hoc Compliance Reviews (B6, B7) ---
+  async addBreakGlassEvent(x) {
+    const r = await this.query(
+      "INSERT INTO break_glass_events(id, patient_id, doctor_id, reason_code, justification, facility, expires_at, created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *",
+      [x.id, x.patientId, x.doctorId, x.reasonCode, x.justification, x.facility, x.expiresAt, x.createdAt || new Date().toISOString()]
+    );
+    return r.rows[0];
+  }
+
+  async getPendingBreakGlassReviews(limit = 50, offset = 0) {
+    const r = await this.query(
+      `SELECT bge.*, bgr.decision, bgr.reviewer_id, bgr.notes, bgr.created_at as reviewed_at
+       FROM break_glass_events bge
+       LEFT JOIN break_glass_reviews bgr ON bgr.event_id = bge.id
+       ORDER BY bge.created_at DESC LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+    return r.rows;
+  }
+
+  async addBreakGlassReview(x) {
+    const r = await this.query(
+      "INSERT INTO break_glass_reviews(id, event_id, reviewer_id, decision, notes, created_at) VALUES($1,$2,$3,$4,$5,$6) RETURNING *",
+      [x.id, x.eventId, x.reviewerId, x.decision, x.notes || null, x.createdAt || new Date().toISOString()]
+    );
+    return r.rows[0];
+  }
+
+  // --- Hash-Chained Append-Only Audit Log (Step 4 Audit) ---
+  async addAuditEvent(x) {
+    const r = await this.query(
+      "INSERT INTO audit_events(id, patient_id, actor, action, details, previous_hash, current_hash, created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *",
+      [
+        x.id,
+        isValidUuid(x.patientId) ? x.patientId : null,
+        canonicalizeWallet(x.actor),
+        x.action,
+        JSON.stringify(x.details || {}),
+        x.previousHash,
+        x.currentHash,
+        x.createdAt || new Date().toISOString(),
+      ]
+    );
+    return r.rows[0];
+  }
+
+  async getLastAuditEvent() {
+    const r = await this.query(
+      "SELECT * FROM audit_events ORDER BY sequence_num DESC LIMIT 1"
+    );
+    return r.rows[0] || null;
+  }
+
+  async getAuditEvents(patientId, limit = 50, offset = 0) {
+    const sql = patientId
+      ? "SELECT * FROM audit_events WHERE patient_id=$1 ORDER BY sequence_num ASC LIMIT $2 OFFSET $3"
+      : "SELECT * FROM audit_events ORDER BY sequence_num ASC LIMIT $1 OFFSET $2";
+    const params = patientId ? [patientId, limit, offset] : [limit, offset];
+    const r = await this.query(sql, params);
+    return r.rows;
+  }
+
+  // --- Transactional Outbox (B13) ---
+  async addOutboxItem(x) {
+    const r = await this.query(
+      "INSERT INTO outbox(id, topic, payload, status, retries, created_at) VALUES($1,$2,$3,'pending',0,$4) RETURNING *",
+      [x.id, x.topic, JSON.stringify(x.payload || {}), x.createdAt || new Date().toISOString()]
+    );
+    return r.rows[0];
+  }
+
+  async getPendingOutboxItems(limit = 10) {
+    const r = await this.query(
+      "SELECT * FROM outbox WHERE status='pending' AND retries < 5 ORDER BY created_at ASC LIMIT $1",
+      [limit]
+    );
+    return r.rows.map((row) => ({
+      ...row,
+      payload: typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload,
+    }));
+  }
+
+  async markOutboxItemCompleted(id) {
+    const r = await this.query("UPDATE outbox SET status='sent' WHERE id=$1 RETURNING *", [id]);
+    return r.rows[0];
+  }
+
+  async markOutboxItemFailed(id, errorMessage) {
+    const r = await this.query(
+      "UPDATE outbox SET retries = retries + 1, status = CASE WHEN retries + 1 >= 5 THEN 'failed' ELSE 'pending' END WHERE id=$1 RETURNING *",
+      [id]
+    );
+    return r.rows[0];
+  }
 }
 
 class JsonStore {
@@ -534,6 +707,150 @@ class JsonStore {
     Object.assign(x, p);
     this.save();
     return normalizeProvider(x);
+  }
+  // --- Sessions (B11) ---
+  async createSession(x) {
+    this.state.sessions = this.state.sessions || [];
+    const session = { ...x, createdAt: x.createdAt || new Date().toISOString() };
+    this.state.sessions.push(session);
+    this.save();
+    return session;
+  }
+
+  async getSessionByHash(tokenHash) {
+    this.state.sessions = this.state.sessions || [];
+    return this.state.sessions.find((s) => s.tokenHash === tokenHash) || null;
+  }
+
+  async revokeSession(id) {
+    this.state.sessions = this.state.sessions || [];
+    const session = this.state.sessions.find((s) => s.id === id);
+    if (session) {
+      session.revokedAt = new Date().toISOString();
+      this.save();
+    }
+    return session || null;
+  }
+
+  async isSessionActive(id) {
+    this.state.sessions = this.state.sessions || [];
+    const s = this.state.sessions.find((x) => x.id === id);
+    if (!s || s.revokedAt) return false;
+    return new Date(s.expiresAt) > new Date();
+  }
+
+  // --- Key Registry (B2, B3) ---
+  async getKeyRecord(patientId) {
+    this.state.keys = this.state.keys || [];
+    const records = this.state.keys.filter((k) => k.patientId === patientId && k.status !== "shredded");
+    return records.length > 0 ? records[records.length - 1] : null;
+  }
+
+  async saveKeyRecord(x) {
+    this.state.keys = this.state.keys || [];
+    const record = { ...x, createdAt: x.createdAt || new Date().toISOString() };
+    this.state.keys.push(record);
+    this.save();
+    return record;
+  }
+
+  async shredKeyRecord(patientId) {
+    this.state.keys = this.state.keys || [];
+    const records = this.state.keys.filter((k) => k.patientId === patientId);
+    for (const r of records) {
+      r.status = "shredded";
+      r.rotatedAt = new Date().toISOString();
+    }
+    this.save();
+    return records;
+  }
+
+  // --- Break-Glass & Reviews (B6, B7) ---
+  async addBreakGlassEvent(x) {
+    this.state.breakGlassEvents = this.state.breakGlassEvents || [];
+    const event = { ...x, createdAt: x.createdAt || new Date().toISOString() };
+    this.state.breakGlassEvents.push(event);
+    this.save();
+    return event;
+  }
+
+  async getPendingBreakGlassReviews(limit = 50, offset = 0) {
+    this.state.breakGlassEvents = this.state.breakGlassEvents || [];
+    this.state.breakGlassReviews = this.state.breakGlassReviews || [];
+    const reviewedEventIds = new Set(this.state.breakGlassReviews.map((r) => r.eventId));
+    return this.state.breakGlassEvents
+      .filter((e) => !reviewedEventIds.has(e.id))
+      .slice(offset, offset + limit);
+  }
+
+  async addBreakGlassReview(x) {
+    this.state.breakGlassReviews = this.state.breakGlassReviews || [];
+    const review = { ...x, createdAt: x.createdAt || new Date().toISOString() };
+    this.state.breakGlassReviews.push(review);
+    this.save();
+    return review;
+  }
+
+  // --- Audit Events (Step 4 Audit) ---
+  async addAuditEvent(x) {
+    this.state.auditEvents = this.state.auditEvents || [];
+    const event = { ...x, sequenceNum: this.state.auditEvents.length + 1, createdAt: x.createdAt || new Date().toISOString() };
+    this.state.auditEvents.push(event);
+    this.save();
+    return event;
+  }
+
+  async getLastAuditEvent() {
+    this.state.auditEvents = this.state.auditEvents || [];
+    return this.state.auditEvents.length > 0
+      ? this.state.auditEvents[this.state.auditEvents.length - 1]
+      : null;
+  }
+
+  async getAuditEvents(patientId, limit = 50, offset = 0) {
+    this.state.auditEvents = this.state.auditEvents || [];
+    const events = patientId
+      ? this.state.auditEvents.filter((e) => e.patientId === patientId)
+      : this.state.auditEvents;
+    return events.slice(offset, offset + limit);
+  }
+
+  // --- Transactional Outbox (B13) ---
+  async addOutboxItem(x) {
+    this.state.outbox = this.state.outbox || [];
+    const item = { ...x, status: "pending", retries: 0, createdAt: x.createdAt || new Date().toISOString() };
+    this.state.outbox.push(item);
+    this.save();
+    return item;
+  }
+
+  async getPendingOutboxItems(limit = 10) {
+    this.state.outbox = this.state.outbox || [];
+    return this.state.outbox
+      .filter((i) => i.status === "pending" && i.retries < 5)
+      .slice(0, limit);
+  }
+
+  async markOutboxItemCompleted(id) {
+    this.state.outbox = this.state.outbox || [];
+    const item = this.state.outbox.find((i) => i.id === id);
+    if (item) {
+      item.status = "sent";
+      this.save();
+    }
+    return item;
+  }
+
+  async markOutboxItemFailed(id, error) {
+    this.state.outbox = this.state.outbox || [];
+    const item = this.state.outbox.find((i) => i.id === id);
+    if (item) {
+      item.retries = (item.retries || 0) + 1;
+      if (item.retries >= 5) item.status = "failed";
+      item.lastError = error;
+      this.save();
+    }
+    return item;
   }
 
   save(itemToUpdate) {

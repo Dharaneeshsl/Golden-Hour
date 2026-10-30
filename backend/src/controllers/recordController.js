@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const { canonicalizeWallet } = require("../config/db");
+const { asyncHandler } = require("../utils/asyncHandler");
 
 function canonicalJsonStringify(obj) {
   if (obj === null || typeof obj !== "object") {
@@ -23,8 +24,11 @@ function createRecordController({ store, encryption, ipfs, chain }) {
     const reqWallet = canonicalizeWallet(req.user.wallet);
     const patientWallet = canonicalizeWallet(patient.wallet);
 
-    if (req.user.role === "admin" || patientWallet === reqWallet) return true;
+    // Patient reading their own records
+    if (patientWallet === reqWallet) return true;
 
+    // B5 Fix: System Admins CANNOT read or decrypt patient PHI clinical records!
+    // Removed req.user.role === "admin"
     const provider = await store.providerByWallet(reqWallet);
     return !!(
       provider &&
@@ -34,7 +38,7 @@ function createRecordController({ store, encryption, ipfs, chain }) {
   };
 
   return {
-    create: async (req, res) => {
+    create: asyncHandler(async (req, res) => {
       const { patientId, recordType, clinicalData } = req.body || {};
       const patient = await store.patientById(patientId);
       if (!patient) return res.status(404).json({ error: "Patient not found" });
@@ -113,9 +117,9 @@ function createRecordController({ store, encryption, ipfs, chain }) {
         console.error("Record creation error:", e);
         res.status(502).json({ error: "Secure record persistence failed" });
       }
-    },
+    }),
 
-    list: async (req, res) => {
+    list: asyncHandler(async (req, res) => {
       const patient = await store.patientById(req.params.patientId);
       if (!patient) return res.status(404).json({ error: "Patient not found" });
 
@@ -125,10 +129,13 @@ function createRecordController({ store, encryption, ipfs, chain }) {
           .json({ error: "Patient consent required for record access" });
       }
 
-      res.json(await store.recordsForPatient(patient.id));
-    },
+      const limit = parseInt(req.query.limit, 10) || 50;
+      const offset = parseInt(req.query.offset, 10) || 0;
+      const records = await store.recordsForPatient(patient.id);
+      res.json(records.slice(offset, offset + limit));
+    }),
 
-    detail: async (req, res) => {
+    detail: asyncHandler(async (req, res) => {
       const patient = await store.patientById(req.params.patientId);
       if (!patient) return res.status(404).json({ error: "Patient not found" });
 
@@ -160,7 +167,7 @@ function createRecordController({ store, encryption, ipfs, chain }) {
         console.error("Record detail error:", e);
         res.status(502).json({ error: "Secure record retrieval failed" });
       }
-    },
+    }),
   };
 }
 

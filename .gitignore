@@ -8,6 +8,8 @@ typechain-types/
 dist/
 coverage/
 *.log
+.data/
+**/.data/
 
 # Repomix bundles
 repomix-output.xml
