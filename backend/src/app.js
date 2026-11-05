@@ -82,7 +82,32 @@ async function createApp({
     .filter(Boolean);
 
   app.use(
-    helmet(),
+    helmet({
+      frameguard: { action: "deny" },
+      referrerPolicy: { policy: "no-referrer" },
+      hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+      xContentTypeOptions: true,
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", "data:", "blob:"],
+          connectSrc: ["'self'"],
+          fontSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          frameAncestors: ["'none'"],
+          baseUri: ["'self'"],
+          formAction: ["'self'"],
+          workerSrc: ["'self'"],
+          manifestSrc: ["'self'"],
+        },
+      },
+    }),
+    (_req, res, next) => {
+      res.setHeader("Permissions-Policy", "camera=(self), microphone=(), geolocation=()");
+      next();
+    },
     cors({
       origin: (origin, callback) => {
         if (!origin) return callback(null, false);

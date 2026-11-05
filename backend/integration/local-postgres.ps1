@@ -19,6 +19,8 @@ try {
         $env:RESTORE_TEST_KEY = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($secret))
         node --test --test-concurrency=1 integration/postgres-login.js integration/reliability.test.js integration/key-rotation.test.js
         if ($LASTEXITCODE) { throw "Database regression failed" }
+        node scripts/drill-tooling.js
+        if ($LASTEXITCODE) { throw "Operational and disaster recovery drills failed" }
         if ($Browser) {
             node integration/browser.js
             if ($LASTEXITCODE) { throw "Browser workflow failed" }

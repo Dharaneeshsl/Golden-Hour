@@ -9,7 +9,8 @@
     "dev": "node --watch src/app.js",
     "start": "node src/app.js",
     "check": "node check.js",
-    "test": "node --test test/services.test.js test/serverless.test.js test/vaultKeys.test.js test/postgres-migration.test.js test/auditExport.test.js test/awsKms.test.js",
+    "test": "node --test test/services.test.js test/serverless.test.js test/vaultKeys.test.js test/postgres-migration.test.js test/auditExport.test.js test/awsKms.test.js test/gatewaySecurity.test.js",
+    "drill": "node scripts/drill-tooling.js",
     "db:migrate": "node src/config/migrate.js",
     "test:postgres": "node --test --test-concurrency=1 integration/postgres-login.js integration/reliability.test.js integration/key-rotation.test.js",
     "build": "node build.js"
