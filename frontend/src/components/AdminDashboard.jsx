@@ -10,6 +10,12 @@ export default function AdminDashboard() {
   const [invitation, setInvitation] = useState(null);
   const [recoveries, setRecoveries] = useState([]);
   const [identityConfirmed, setIdentityConfirmed] = useState(false);
+  const [jobs, setJobs] = useState([]);
+  const [deliveryReconciled, setDeliveryReconciled] = useState(false);
+  const [dataRequests, setDataRequests] = useState([]);
+  const [holdPatient, setHoldPatient] = useState("");
+  const [holdReference, setHoldReference] = useState("");
+  const [holdActive, setHoldActive] = useState(true);
   const [reviews, setReviews] = useState([]);
   const [patients, setPatients] = useState([]);
   const [audits, setAudits] = useState([]);
@@ -31,6 +37,8 @@ export default function AdminDashboard() {
     else if (activeTab === "patients") loadPatients();
     else if (activeTab === "operations") api.operations().then(setOperations).catch(e => setError(e.message));
     else if (activeTab === "recovery") api.recoveries().then(setRecoveries).catch(e => setError(e.message));
+    else if (activeTab === "jobs") api.jobs().then(setJobs).catch(e => setError(e.message));
+    else if (activeTab === "data") api.dataRequests().then(setDataRequests).catch(e => setError(e.message));
     else if (activeTab === "reviews") api.pendingReviews().then(setReviews).catch(e => setError(e.message));
     else if (activeTab === "audits") loadAudits();
   }, [activeTab, providerStatus]);
@@ -79,6 +87,8 @@ export default function AdminDashboard() {
             Emergency Access Audits
           </button>
           <button onClick={() => setActiveTab("recovery")}>Patient recovery</button>
+          <button onClick={() => setActiveTab("jobs")}>Background jobs</button>
+          <button onClick={() => setActiveTab("data")}>Patient data requests</button>
           <button onClick={() => setActiveTab("operations")}>Incident controls</button>
           <button onClick={() => setActiveTab("reviews")}>Pending reviews</button>
         </div>
@@ -99,6 +109,37 @@ export default function AdminDashboard() {
               finally {setBusy("");}
             }}>{decision==="approve" ? "Approve recovery" : "Reject recovery"}</button>)}
           </article>)}
+        </section>}
+        {activeTab === "jobs" && <section>
+          <h3>Background jobs</h3>
+          <p>Verify any external delivery with the provider before retrying a failed job.</p>
+          <label><input type="checkbox" checked={deliveryReconciled} onChange={e => setDeliveryReconciled(e.target.checked)} /> I reconciled delivery with the provider.</label>
+          {jobs.length===0 && <p>No outstanding jobs.</p>}
+          {jobs.map(job => <article key={job.id}>
+            <p>{job.topic} · {job.status} · {job.retries} attempts</p>
+            {job.status==="failed" && <button disabled={!deliveryReconciled || !!busy} onClick={async () => {
+              setBusy(job.id);
+              try {await api.retryJob(job.id);setJobs(await api.jobs());setDeliveryReconciled(false);}
+              catch (err) {setError(err.message);}
+              finally {setBusy("");}
+            }}>Retry reconciled job</button>}
+          </article>)}
+        </section>}
+        {activeTab === "data" && <section>
+          <h3>Patient data requests and retention holds</h3>
+          <p>Clinical erasure requires an authorized hospital operator to review retention and approvals. This screen records retention holds.</p>
+          {dataRequests.map(item => <p key={item.id}>{item.request_type} · {item.status} · Request {item.id} · Patient {item.patient_id}</p>)}
+          <form onSubmit={async event => {
+            event.preventDefault();setBusy("hold");setError("");
+            try {await api.setRetentionHold(holdPatient,{active:holdActive,caseReference:holdReference});setHoldReference("");}
+            catch (err) {setError(err.message);}
+            finally {setBusy("");}
+          }}>
+            <label>Patient identifier<input value={holdPatient} onChange={e => setHoldPatient(e.target.value)} required /></label>
+            <label>Retention case reference<input value={holdReference} onChange={e => setHoldReference(e.target.value)} required minLength={10} /></label>
+            <label><input type="checkbox" checked={holdActive} onChange={e => setHoldActive(e.target.checked)} /> Retention hold active</label>
+            <button disabled={!!busy}>Save retention decision</button>
+          </form>
         </section>}
         {activeTab === "operations" && operations && <section>
           <h3>Incident controls</h3>

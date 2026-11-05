@@ -47,6 +47,22 @@ export default function DoctorDashboard({ wallet }) {
     return () => clearTimeout(timer);
   }, [selected]);
 
+  useEffect(() => {
+    if (!selected || selected.expiresAt) return;
+    let active = true;
+    const check = async () => {
+      try {await api.records(selected.patientId || patientId);}
+      catch (err) {
+        if (active && [401,403,404,410,503].includes(err.status)) {
+          setSelected(null);
+          setError("Record access is no longer available. Confirm consent before continuing.");
+        }
+      }
+    };
+    const interval = setInterval(check,15000);
+    return () => {active=false;clearInterval(interval);};
+  }, [selected?.id,selected?.expiresAt,patientId]);
+
   const register = async (e) => {
     e.preventDefault();
     setBusy(true);

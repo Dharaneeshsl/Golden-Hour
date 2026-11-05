@@ -38,7 +38,7 @@ test("rotated cards, conflicting edits and emergency reads through hospital APIs
   // The injected test pool deliberately does not exercise deployment TLS.
   const admin = Wallet.createRandom(), doctor = Wallet.createRandom(), patient = Wallet.createRandom();
   const settings = {
-    NODE_ENV:"production", AUTH_URI:"https://hospital.example", AUTH_DOMAIN:"hospital.example",
+    NODE_ENV:"production", HOSPITAL_NAME:"Synthetic hospital", AUTH_URI:"https://hospital.example", AUTH_DOMAIN:"hospital.example",
     FRONTEND_ORIGIN:"https://hospital.example", DB_SSL:"true", DB_CA:"injected-test-pool",
     ADMIN_WALLETS:admin.address, JWT_SECRET:require("crypto").randomBytes(48).toString("hex"),
     ENCRYPTION_KEY:process.env.RESTORE_TEST_KEY || require("crypto").randomBytes(32).toString("base64")
@@ -96,7 +96,7 @@ test("rotated cards, conflicting edits and emergency reads through hospital APIs
   assert.equal(object.rows[0].payload.version,2);
   assert.ok(!JSON.stringify(object.rows[0]).includes("Synthetic clinical data"));
   const emergency = cardToken => app.post("/api/emergency-access").set("Authorization",doctorAuth)
-    .send({cardToken,justification:"Synthetic drill for card rotation"});
+    .send({cardToken,identityConfirmed:true,justification:"Synthetic drill for card rotation"});
   await emergency(oldCard).expect(404);
   const event = await emergency(activeCard).expect(200);
   assert.ok(!JSON.stringify(event.body).includes("Synthetic drill"));
@@ -186,4 +186,59 @@ test("HTTP throttles are shared across API instances",async t => {
   assert.deepEqual(results.map(r => r.totalHits).sort((a,b)=>a-b),Array.from({length:20},(_,i)=>i+1));
   await stores[1].resetKey("synthetic-client");
   assert.equal((await stores[0].increment("synthetic-client")).totalHits,1);
+});
+
+test("outbox leases prevent concurrent delivery and ignore stale completion",async t => {
+  const pool = new Pool({connectionString:process.env.DATABASE_URL});
+  t.after(() => pool.end());
+  const store = new PostgresStore(pool);
+  const id = require("crypto").randomUUID();
+  await store.addOutboxItem({id,topic:"SMS_NOTIFICATION",payload:{}});
+  const batches = await Promise.all([store.claimOutboxItems(),new PostgresStore(pool).claimOutboxItems()]);
+  const matches = batches.flat().filter(item=>item.id===id);
+  assert.equal(matches.length,1);
+  const first = matches[0];
+  await pool.query("UPDATE outbox SET lease_until=now()-interval '1 second' WHERE id=$1",[id]);
+  const second = (await store.claimOutboxItems()).find(item=>item.id===id);
+  assert.ok(second);
+  assert.notEqual(second.lease_token,first.lease_token);
+  assert.equal(await store.markOutboxItemCompleted(id,first.lease_token),undefined);
+  await store.markOutboxItemFailed(id,"Provider unavailable",second.lease_token);
+  assert.equal((await store.claimOutboxItems()).some(item=>item.id===id),false);
+  assert.equal((await pool.query("SELECT status FROM outbox WHERE id=$1",[id])).rows[0].status,"pending");
+});
+
+test("retention holds block erasure and ledger replay prevents restored data exposure",async t => {
+  const crypto = require("crypto"), fs=require("fs"), path=require("path");
+  const {erasePatient,replayLedger,assertErasureLedgerApplied} = require("../src/services/erasureService");
+  const pool = new Pool({connectionString:process.env.DATABASE_URL});
+  const database = "gh_erasure_" + crypto.randomBytes(6).toString("hex");
+  await pool.query("CREATE DATABASE " + database);
+  const url = new URL(process.env.DATABASE_URL);url.pathname="/" + database;
+  const ledger = new Pool({connectionString:url.href});
+  t.after(async () => {await ledger.end();await pool.query("DROP DATABASE " + database);await pool.end();});
+  await ledger.query(fs.readFileSync(path.join(__dirname,"../../deploy/erasure-ledger.sql"),"utf8"));
+  const store = new PostgresStore(pool);
+  const patient = {id:crypto.randomUUID(),wallet:Wallet.createRandom().address,profile:{name:"Synthetic erasure fixture"},critical:{},createdAt:new Date().toISOString()};
+  await store.addPatient(patient);
+  const requestId = crypto.randomUUID();
+  await pool.query("INSERT INTO data_subject_requests(id,patient_id,request_type,details) VALUES ($1,$2,'erasure','Synthetic patient request')",[requestId,patient.id]);
+  await pool.query("INSERT INTO patient_data_holds(patient_id,case_reference,updated_by) VALUES ($1,'Synthetic hold','operator')",[patient.id]);
+  const options = {requestId,retentionDays:0,approvalReference:"Synthetic approved case ERASURE-1"};
+  await assert.rejects(erasePatient(store,ledger,options),/retention hold/);
+  assert.ok(await store.patientById(patient.id));
+  await pool.query("UPDATE patient_data_holds SET active=false WHERE patient_id=$1",[patient.id]);
+  await assert.rejects(erasePatient(store,ledger,{...options,retentionDays:36500}),/not elapsed/);
+  const receipt = await erasePatient(store,ledger,options);
+  assert.ok(receipt.receiptId);
+  assert.equal(await store.patientById(patient.id),null);
+  await assertErasureLedgerApplied(store,ledger);
+  await assert.rejects(ledger.query("DELETE FROM erasure_ledger"),/append-only/);
+  // Simulate restoring the pre-erasure patient and receipt state from an older backup.
+  await store.addPatient(patient);
+  await pool.query("DELETE FROM erasure_receipts WHERE id=$1",[receipt.receiptId]);
+  await assert.rejects(assertErasureLedgerApplied(store,ledger),/replay required/);
+  await replayLedger(store,ledger);
+  assert.equal(await store.patientById(patient.id),null);
+  await assertErasureLedgerApplied(store,ledger);
 });

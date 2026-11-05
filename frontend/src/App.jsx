@@ -1,14 +1,15 @@
-import { useState, useEffect, useRef } from "react";
+import { lazy, Suspense, useState, useEffect, useRef } from "react";
 import { Link, Route, Routes, useNavigate, useParams, Navigate } from "react-router-dom";
-import PatientDashboard from "./components/PatientDashboard";
-import DoctorDashboard from "./components/DoctorDashboard";
-import EmergencyScanView from "./components/EmergencyScanView";
-import PatientOnboarding from "./components/PatientOnboarding";
-import AdminDashboard from "./components/AdminDashboard";
-import Login from "./pages/login";
 import WalletConnectButton from "./components/WalletConnectButton";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { fullLogoutCleanup } from "./utils/session";
+
+const PatientDashboard = lazy(() => import("./components/PatientDashboard"));
+const DoctorDashboard = lazy(() => import("./components/DoctorDashboard"));
+const EmergencyScanView = lazy(() => import("./components/EmergencyScanView"));
+const PatientOnboarding = lazy(() => import("./components/PatientOnboarding"));
+const AdminDashboard = lazy(() => import("./components/AdminDashboard"));
+const Login = lazy(() => import("./pages/login"));
 
 function Home({ user }) {
   return (
@@ -185,6 +186,7 @@ export default function App() {
         </header>
 
         <main>
+          <Suspense fallback={<p role="status">Loading your workspace…</p>}>
           <Routes>
             <Route path="/" element={<Home user={user} />} />
             <Route
@@ -218,6 +220,7 @@ export default function App() {
             <Route path="/emergency" element={<EmergencyRoute />} />
             <Route path="/emergency/:id" element={<EmergencyRoute />} />
           </Routes>
+          </Suspense>
         </main>
 
         <footer>

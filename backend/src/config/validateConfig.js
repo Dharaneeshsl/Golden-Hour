@@ -27,6 +27,7 @@ function validateStartupConfig() {
     if (process.env.DB_SSL !== "true" || process.env.DB_REJECT_UNAUTHORIZED === "false" || (!process.env.DB_CA && !process.env.DB_CA_PEM)) {
       throw new Error("Production requires verified PostgreSQL TLS and DB_CA");
     }
+    if (!process.env.HOSPITAL_NAME?.trim()) throw new Error("HOSPITAL_NAME is required for a hospital deployment");
     const database = new URL(process.env.DATABASE_URL);
     if (["sslmode","sslrootcert","sslcert","sslkey","ssl"].some(key => database.searchParams.has(key))) {
       throw new Error("Configure database TLS through DB_CA, not connection string overrides");

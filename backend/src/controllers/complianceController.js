@@ -6,6 +6,23 @@ const { canonicalizeWallet } = require("../config/db");
 
 function createComplianceController({ store, ipfs, encryption, envelopeEncryption, auditChain }) {
   return {
+    hold: asyncHandler(async (req,res) => {
+      if (req.user.role !== "admin") return res.sendStatus(403);
+      const {active,caseReference} = req.body || {};
+      if (typeof active!=="boolean" || typeof caseReference!=="string" || caseReference.length<10 || caseReference.length>200) return res.status(400).json({error:"A hospital retention case reference is required"});
+      await store.transaction(async tx => {
+        const patient = (await tx.query("SELECT id FROM patients WHERE id=$1 FOR UPDATE",[req.params.patientId])).rows[0];
+        if (!patient) {const error=new Error("Patient unavailable");error.status=404;throw error;}
+        await tx.query("INSERT INTO patient_data_holds(patient_id,case_reference,active,updated_by) VALUES ($1,$2,$3,$4) ON CONFLICT(patient_id) DO UPDATE SET case_reference=EXCLUDED.case_reference,active=EXCLUDED.active,updated_by=EXCLUDED.updated_by,updated_at=now()",
+          [patient.id,caseReference,active,req.user.wallet]);
+        await new (require("../services/auditChainService").AuditChainService)(tx).appendAuditEvent({patientId:patient.id,actor:req.user.wallet,action:"RETENTION_HOLD_CHANGED",details:{active}});
+      });
+      res.json({active});
+    }),
+    requests: asyncHandler(async (req,res) => {
+      if (req.user.role !== "admin") return res.sendStatus(403);
+      res.json((await store.query("SELECT id,patient_id,request_type,status,created_at FROM data_subject_requests ORDER BY created_at DESC LIMIT 100")).rows);
+    }),
     archive: asyncHandler(async (req,res) => {
       const patient = await store.patientByWallet(req.user.wallet);
       if (!patient) return res.status(403).json({error:"Patient enrollment required"});
@@ -79,9 +96,10 @@ function createComplianceController({ store, ipfs, encryption, envelopeEncryptio
 
         const patientId = patient.id;
         const { requestType, details } = req.body || {};
-        const validTypes = ["access", "correction", "grievance"];
+        if (details !== undefined && (typeof details !== "string" || details.length>2000)) return res.status(400).json({error:"Request details must be text up to 2000 characters"});
+        const validTypes = ["access", "correction", "grievance", "erasure"];
 
-        if (requestType === "erasure") {
+        if (requestType === "erasure" && process.env.CLINICAL_ERASURE_ENABLED !== "true") {
           return res.status(400).json({
             error: "Automated erasure request is temporarily disabled pending Step 4 legal-hold verification and persistent KMS implementation",
           });

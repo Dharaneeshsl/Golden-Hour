@@ -39,6 +39,7 @@ async function createApp({
   ipfs,
 } = {}) {
   validateStartupConfig();
+  let erasureLedger;
   const ownsStore = !store;
   store = store || (await createStore());
   try {
@@ -105,6 +106,23 @@ async function createApp({
     express.json({ limit: "256kb" })
   );
 
+  if (process.env.CLINICAL_ERASURE_ENABLED === "true") {
+    if (!process.env.ERASURE_LEDGER_DATABASE_URL) throw new Error("Independent erasure ledger required");
+    const {Pool} = require("pg");
+    const {getDbSslConfig} = require("./config/migrate");
+    const {assertErasureLedgerApplied} = require("./services/erasureService");
+    const primary = new URL(process.env.DATABASE_URL), external = new URL(process.env.ERASURE_LEDGER_DATABASE_URL);
+    if (primary.host===external.host && primary.pathname===external.pathname) throw new Error("Independent ledger database required");
+    if (["sslmode","sslrootcert","sslcert","sslkey","ssl"].some(key => external.searchParams.has(key))) throw new Error("Configure ledger TLS with DB_CA_PEM, not URL overrides");
+    const ledger = erasureLedger = new Pool({connectionString:external.href,ssl:getDbSslConfig(),max:2,connectionTimeoutMillis:5000});
+    app.set("erasureLedger",ledger);
+    await assertErasureLedgerApplied(store,ledger);
+    app.use("/api",asyncHandler(async (_req,res,next) => {
+      try {await assertErasureLedgerApplied(store,ledger);next();}
+      catch {res.status(503).json({error:"Patient privacy recovery check failed. Contact the hospital."});}
+    }));
+  }
+
   app.use(
     "/api",
     rateLimit({
@@ -146,9 +164,10 @@ async function createApp({
 
   app.get(["/ready","/api/ready"], async (_q, s) => {
     try {
+      if (erasureLedger) await require("./services/erasureService").assertErasureLedgerApplied(store,erasureLedger);
       if (store.query) {
         // Bug #31 Fix: Verify migration table exists in database
-        const result = await store.query("SELECT 1 FROM schema_migrations WHERE filename=$1", ["011_patient_recovery.sql"]);
+        const result = await store.query("SELECT 1 FROM schema_migrations WHERE filename=$1", ["014_summary_provenance.sql"]);
         if (!result.rowCount) throw new Error("Pending schema upgrade");
       }
       s.json({
@@ -165,6 +184,22 @@ async function createApp({
     if (!store.query) return localControls;
     return (await store.query("SELECT enrollment_paused,emergency_paused FROM service_controls WHERE id=1")).rows[0];
   }
+  app.get("/api/operations/jobs", requireAuth, asyncHandler(async (req,res) => {
+    if (req.user.role !== "admin") return res.sendStatus(403);
+    if (!store.query) return res.json([]);
+    res.json((await store.query("SELECT id,topic,status,retries,available_at,last_error FROM outbox WHERE status<>'sent' ORDER BY created_at LIMIT 50")).rows);
+  }));
+  app.post("/api/operations/jobs/:id/retry",requireAuth,asyncHandler(async (req,res) => {
+    if (req.user.role !== "admin") return res.sendStatus(403);
+    if (req.body?.deliveryReconciled!==true) return res.status(400).json({error:"Verify the provider delivery status before retrying"});
+    const result = await store.transaction(async tx => {
+      const job = (await tx.query("UPDATE outbox SET status='pending',retries=0,available_at=now(),lease_token=NULL,lease_until=NULL WHERE id=$1 AND status='failed' RETURNING id",[req.params.id])).rows[0];
+      if (job) await new AuditChainService(tx).appendAuditEvent({actor:req.user.wallet,action:"JOB_RETRY_APPROVED",details:{jobId:job.id}});
+      return job;
+    });
+    if (!result) return res.sendStatus(409);
+    res.json(result);
+  }));
   app.get("/api/operations", requireAuth, asyncHandler(async (req,res) => {
     if (req.user.role !== "admin") return res.sendStatus(403);
     res.json(await controls());
@@ -202,6 +237,7 @@ async function createApp({
   app.use("/api/records", recordRoutes(createRecordController(c), store));
   app.use("/api/emergency-access", emergencyRoutes(createEmergencyController(c), store));
   app.use("/api/consents", consentRoutes(createConsentController(c)));
+  app.use("/api/maintenance", require("./routes/maintenanceRoutes")({store}));
   app.use("/api/recovery", require("./routes/recoveryRoutes")({store}));
   app.use("/api/compliance", complianceRoutes(createComplianceController(c)));
 
@@ -218,6 +254,7 @@ async function createApp({
 
   return app;
   } catch (error) {
+    await erasureLedger?.end();
     if (ownsStore) await store.pool?.end();
     throw error;
   }
@@ -236,7 +273,7 @@ if (require.main === module) {
       const timeout = setTimeout(() => process.exit(1), 15000);
       timeout.unref();
       server.close(async () => {
-        try { await app.get("store")?.pool?.end(); }
+        try { await app.get("store")?.pool?.end(); await app.get("erasureLedger")?.end(); }
         catch { process.exitCode = 1; }
         finally { clearTimeout(timeout); }
       });

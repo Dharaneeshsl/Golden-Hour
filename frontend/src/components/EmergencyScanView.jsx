@@ -5,6 +5,7 @@ import { REASON_CODES } from "../config/i18n";
 
 export default function EmergencyScanView({ initialPatientId = "", cardToken }) {
   const [patientId, setPatientId] = useState(initialPatientId);
+  const [identityConfirmed, setIdentityConfirmed] = useState(false);
   const [reasonCode, setReasonCode] = useState(REASON_CODES[0]?.code || "TRAUMA_UNRESPONSIVE");
   const [facility, setFacility] = useState("");
   const [justification, setJustification] = useState(
@@ -52,7 +53,7 @@ export default function EmergencyScanView({ initialPatientId = "", cardToken }) 
     setError("");
     setExpired(false);
     try {
-      const access = await api.emergency({ cardToken, patientId: patientId.trim(), justification, reasonCode, facility });
+      const access = await api.emergency({ cardToken, identityConfirmed, patientId: patientId.trim(), justification, reasonCode, facility });
       setAccessGrant(access);
     } catch (err) {
       setError(err.message || "Failed to trigger emergency break-glass access");
@@ -104,7 +105,7 @@ export default function EmergencyScanView({ initialPatientId = "", cardToken }) 
 
       <div className="panel">
         <h3>Emergency Patient Lookup</h3>
-        {cardToken ? <p>Scanned card. Confirm patient identity using hospital procedure before continuing.</p> : <><label>Patient ID</label>
+        {cardToken ? <label><input type="checkbox" checked={identityConfirmed} onChange={event => setIdentityConfirmed(event.target.checked)} /> I confirmed patient identity using hospital procedure.</label> : <><label>Patient ID</label>
         <input
           value={patientId}
           onChange={(e) => setPatientId(e.target.value)}
@@ -137,7 +138,7 @@ export default function EmergencyScanView({ initialPatientId = "", cardToken }) 
         <button
           className="primary"
           onClick={submitBreakGlass}
-          disabled={busy || !token}
+          disabled={busy || !token || (cardToken && !identityConfirmed)}
         >
           {busy ? "Verifying access…" : "Trigger Logged Emergency Access"}
         </button>
@@ -178,6 +179,7 @@ export default function EmergencyScanView({ initialPatientId = "", cardToken }) 
               </div>
               <div>
                 <span>Allergies</span>
+                {criticalData.provenance?.allergies && <small>{criticalData.provenance.allergies.source} · {new Date(criticalData.provenance.allergies.updatedAt).toLocaleString()}</small>}
                 <strong>{(criticalData.critical?.allergies || []).join(", ") || "Unknown"}</strong>
               </div>
               <div>

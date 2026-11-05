@@ -4,6 +4,8 @@ const { requireAuth } = require("../middleware/authMiddleware");
 module.exports = (controller) => {
   const router = express.Router();
 
+  router.get("/requests", requireAuth, controller.requests);
+  router.put("/holds/:patientId", requireAuth, controller.hold);
   router.get("/me/archive", requireAuth, controller.archive);
 
   // Export: strictly limited to the patient themselves

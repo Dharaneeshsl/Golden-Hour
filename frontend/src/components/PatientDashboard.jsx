@@ -18,6 +18,9 @@ export default function PatientDashboard({ patientId = "", wallet = "" }) {
     medications: "",
   });
   const [busy, setBusy] = useState(false);
+  const [requestType, setRequestType] = useState("access");
+  const [requestDetails, setRequestDetails] = useState("");
+  const [requestReceipt, setRequestReceipt] = useState(null);
   const [downloadingFhir, setDownloadingFhir] = useState(false);
 
   const downloadArchive = async () => {
@@ -258,6 +261,22 @@ export default function PatientDashboard({ patientId = "", wallet = "" }) {
           )}
         </article>
 
+        <article className="panel wide">
+          <h3>Patient data requests</h3>
+          <form onSubmit={async event => {
+            event.preventDefault();setBusy(true);setError("");
+            try {const result=await api.submitDataRequest({requestType,details:requestDetails});setRequestReceipt(result.dsr.id);setRequestDetails("");}
+            catch (err) {setError(err.message);}
+            finally {setBusy(false);}
+          }}>
+            <label>Request type<select value={requestType} onChange={e => setRequestType(e.target.value)}>
+              {["access","correction","grievance","erasure"].map(type => <option key={type} value={type}>{type}</option>)}
+            </select></label>
+            <label>Request details<textarea value={requestDetails} onChange={e => setRequestDetails(e.target.value)} maxLength={2000} /></label>
+            <button disabled={busy}>Submit data request</button>
+          </form>
+          {requestReceipt && <p>Request recorded. Contact the hospital with reference {requestReceipt}.</p>}
+        </article>
         <ConsentManager patientId={patient.id} />
       </div>
     </section>

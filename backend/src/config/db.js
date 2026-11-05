@@ -23,6 +23,7 @@ function normalizePatient(row) {
     wallet: canonicalizeWallet(row.wallet),
     profile: typeof row.profile === "string" ? JSON.parse(row.profile) : (row.profile || {}),
     revision: row.revision || 1,
+    criticalProvenance: row.critical_provenance || row.criticalProvenance || {},
     summaryUpdatedAt: row.summary_updated_at || row.summaryUpdatedAt || null,
     critical: typeof row.critical === "string" ? JSON.parse(row.critical) : (row.critical || {}),
     createdAt: row.created_at || row.createdAt,
@@ -198,9 +199,11 @@ class PostgresStore {
 
   async addPatient(x) {
     const w = canonicalizeWallet(x.wallet);
+    const provenance = Object.fromEntries(Object.keys(x.critical || {}).map(field =>
+      [field,{source:"Patient reported",author:w,updatedAt:x.createdAt}]));
     const r = await this.query(
-      "INSERT INTO patients(id,wallet,profile,critical,created_at) VALUES($1,$2,$3,$4,$5) RETURNING *",
-      [x.id, w, JSON.stringify(x.profile || {}), JSON.stringify(x.critical || {}), x.createdAt]
+      "INSERT INTO patients(id,wallet,profile,critical,created_at,critical_provenance) VALUES($1,$2,$3,$4,$5,$6) RETURNING *",
+      [x.id, w, JSON.stringify(x.profile || {}), JSON.stringify(x.critical || {}), x.createdAt, JSON.stringify(provenance)]
     );
     return normalizePatient(r.rows[0]);
   }
@@ -211,9 +214,13 @@ class PostgresStore {
     if (!current) return null;
     const newProfile = patch.profile ? { ...current.profile, ...patch.profile } : current.profile;
     const newCritical = patch.critical ? { ...current.critical, ...patch.critical } : current.critical;
+    const provenance = {...current.criticalProvenance};
+    for (const field of Object.keys(patch.critical || {})) {
+      provenance[field] = {source:"Patient reported",author:current.wallet,updatedAt:new Date().toISOString()};
+    }
     const r = await this.query(
-      "UPDATE patients SET profile=$2, critical=$3, revision=revision+1, summary_updated_at=CASE WHEN $5 THEN now() ELSE summary_updated_at END WHERE id=$1 AND revision=$4 RETURNING *",
-      [id, JSON.stringify(newProfile), JSON.stringify(newCritical), patch.revision, Boolean(patch.critical)]
+      "UPDATE patients SET profile=$2, critical=$3, critical_provenance=$6, revision=revision+1, summary_updated_at=CASE WHEN $5 THEN now() ELSE summary_updated_at END WHERE id=$1 AND revision=$4 RETURNING *",
+      [id, JSON.stringify(newProfile), JSON.stringify(newCritical), patch.revision, Boolean(patch.critical), JSON.stringify(provenance)]
     );
     return normalizePatient(r.rows[0]);
   }
@@ -503,6 +510,20 @@ class PostgresStore {
     return r.rows[0];
   }
 
+  async claimOutboxItems(limit = 10) {
+    await this.query("UPDATE outbox SET status='failed',lease_until=NULL WHERE status='processing' AND lease_until<=now() AND retries>=5");
+    const result = await this.query(
+      `WITH candidates AS (
+        SELECT id FROM outbox WHERE retries<5 AND
+          ((status='pending' AND available_at<=now()) OR (status='processing' AND lease_until<=now()))
+        ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT $1
+       )
+       UPDATE outbox SET status='processing',retries=retries+1,lease_token=gen_random_uuid(),
+         lease_until=now()+interval '60 seconds'
+       WHERE id IN (SELECT id FROM candidates) RETURNING *`,[limit]);
+    return result.rows;
+  }
+
   async getPendingOutboxItems(limit = 10) {
     const r = await this.query(
       "SELECT * FROM outbox WHERE status='pending' AND retries < 5 ORDER BY created_at ASC LIMIT $1",
@@ -514,18 +535,20 @@ class PostgresStore {
     }));
   }
 
-  async markOutboxItemCompleted(id) {
-    const r = await this.query("UPDATE outbox SET status='sent' WHERE id=$1 RETURNING *", [id]);
-    return r.rows[0];
+  async markOutboxItemCompleted(id, leaseToken) {
+    const result = await this.query("UPDATE outbox SET status='sent',lease_until=NULL,last_error=NULL WHERE id=$1 AND lease_token=$2 AND status='processing' RETURNING *",[id,leaseToken]);
+    return result.rows[0];
   }
 
-  async markOutboxItemFailed(id, errorMessage) {
-    const r = await this.query(
-      "UPDATE outbox SET retries = retries + 1, status = CASE WHEN retries + 1 >= 5 THEN 'failed' ELSE 'pending' END WHERE id=$1 RETURNING *",
-      [id]
-    );
-    return r.rows[0];
+  async markOutboxItemFailed(id, _message, leaseToken) {
+    const result = await this.query(
+      `UPDATE outbox SET status=CASE WHEN retries>=5 THEN 'failed' ELSE 'pending' END,
+       available_at=now()+least(300,power(2,retries))*interval '1 second',
+       lease_until=NULL,last_error='Delivery unconfirmed'
+       WHERE id=$1 AND lease_token=$2 AND status='processing' RETURNING *`,[id,leaseToken]);
+    return result.rows[0];
   }
+
 }
 
 class JsonStore {
@@ -606,7 +629,9 @@ class JsonStore {
   }
 
   async addPatient(x) {
-    const entry = normalizePatient({ ...x, wallet: canonicalizeWallet(x.wallet) });
+    const criticalProvenance = Object.fromEntries(Object.keys(x.critical || {}).map(field =>
+      [field,{source:"Patient reported",author:canonicalizeWallet(x.wallet),updatedAt:x.createdAt}]));
+    const entry = normalizePatient({ ...x, criticalProvenance, wallet: canonicalizeWallet(x.wallet) });
     this.state.patients.push(entry);
     this.save();
     return entry;
@@ -618,7 +643,13 @@ class JsonStore {
     const x = this.state.patients[index];
     if ((x.revision || 1) !== patch.revision) return null;
     x.revision = (x.revision || 1) + 1;
-    if (patch.critical) x.summaryUpdatedAt = new Date().toISOString();
+    if (patch.critical) {
+      x.summaryUpdatedAt = new Date().toISOString();
+      x.criticalProvenance ??= {};
+      for (const field of Object.keys(patch.critical)) {
+        x.criticalProvenance[field] = {source:"Patient reported",author:x.wallet,updatedAt:x.summaryUpdatedAt};
+      }
+    }
     if (patch.profile) x.profile = { ...x.profile, ...patch.profile };
     if (patch.critical) x.critical = { ...x.critical, ...patch.critical };
     this.save();

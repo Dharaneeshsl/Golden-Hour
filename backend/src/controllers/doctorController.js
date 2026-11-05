@@ -50,31 +50,31 @@ function createDoctorController({ store, chain, auditChain }) {
             const error = new Error("Invitation expired, used or issued to a different wallet"); error.status=403; throw error;
           }
         }
-      const provider = await tx.addProvider({
-        id: crypto.randomUUID(),
-        wallet,
-        name: name.trim(),
-        licenseNumber: licenseNumber.trim(),
-        specialty: specialty.trim(),
-        status: "pending",
-        createdAt: new Date().toISOString(),
-      });
+        const provider = await tx.addProvider({
+          id: crypto.randomUUID(),
+          wallet,
+          name: name.trim(),
+          licenseNumber: licenseNumber.trim(),
+          specialty: specialty.trim(),
+          status: "pending",
+          createdAt: new Date().toISOString(),
+        });
 
-      await tx.addAudit({
-        id: crypto.randomUUID(),
-        actor: wallet,
-        action: "PROVIDER_REGISTERED",
-        providerId: provider.id,
-        timestamp: new Date().toISOString(),
-      });
-
-      if (transactionAudit && transactionAudit.appendAuditEvent) {
-        await transactionAudit.appendAuditEvent({
+        await tx.addAudit({
+          id: crypto.randomUUID(),
           actor: wallet,
           action: "PROVIDER_REGISTERED",
-          details: { providerId: provider.id, specialty: provider.specialty },
+          providerId: provider.id,
+          timestamp: new Date().toISOString(),
         });
-      }
+
+        if (transactionAudit && transactionAudit.appendAuditEvent) {
+          await transactionAudit.appendAuditEvent({
+            actor: wallet,
+            action: "PROVIDER_REGISTERED",
+            details: { providerId: provider.id, specialty: provider.specialty },
+          });
+        }
 
         return provider;
       };

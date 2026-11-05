@@ -26,6 +26,7 @@ services:
       KMS_MASTER_KEY: ${KMS_MASTER_KEY:?Set wrapping key}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set record encryption key}
       ADMIN_WALLETS: ${ADMIN_WALLETS:?Set hospital administrator}
+      HOSPITAL_NAME: ${HOSPITAL_NAME:?Set hospital display name}
       FRONTEND_ORIGIN: https://${PUBLIC_HOST:?Set hospital hostname}
       AUTH_DOMAIN: ${PUBLIC_HOST}
       AUTH_URI: https://${PUBLIC_HOST}

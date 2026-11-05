@@ -32,6 +32,9 @@ function createEmergencyController({ store, chain, envelopeEncryption, auditChai
         ? (typeof cardToken === "string" && /^[a-f0-9]{64}$/.test(cardToken)
           ? await store.cardPatient(crypto.createHash("sha256").update(cardToken).digest("hex")) : null)
         : req.body?.patientId;
+      if (cardToken && process.env.NODE_ENV==="production" && req.body.identityConfirmed!==true) {
+        return res.status(400).json({error:"Confirm patient identity through the hospital procedure before accessing the scanned card"});
+      }
       const patient = await store.patientById(patientId);
       if (!patient) return res.status(404).json({ error: "Patient not found" });
 
@@ -69,7 +72,7 @@ function createEmergencyController({ store, chain, envelopeEncryption, auditChai
 
         const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
         const clinicalReason = reasonCode || "UNCONSCIOUS_TRAUMA";
-        const hospitalFacility = facility || "Emergency Department";
+        const hospitalFacility = process.env.HOSPITAL_NAME || facility || "Emergency Department";
 
         // B6: Encrypt the stored justification with Envelope Encryption
         let encryptedJustification = null;
@@ -89,6 +92,7 @@ function createEmergencyController({ store, chain, envelopeEncryption, auditChai
             action: "EMERGENCY_BREAK_GLASS",
             providerId: req.provider.id,
             metadata: {
+              identityConfirmed: req.body.identityConfirmed === true,
               scope: "CRITICAL_ONLY",
               encryptedJustification,
               reasonCode: clinicalReason,
@@ -197,6 +201,7 @@ function createEmergencyController({ store, chain, envelopeEncryption, auditChai
         patientId: patient.id,
         critical: patient.critical,
         source: "Patient reported",
+        provenance: patient.criticalProvenance,
         summaryUpdatedAt: patient.summaryUpdatedAt || patient.createdAt,
         expiresAt: event.expiresAt,
       });

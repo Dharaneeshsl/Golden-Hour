@@ -11,6 +11,10 @@ const {totp} = require("../src/services/mfaService");
 
 async function run() {
   assert.ok(process.env.DATABASE_URL,"Supply a disposable database");
+  // Build explicitly for this same-origin fixture, regardless of a developer's local .env.
+  require("child_process").execFileSync(process.execPath,[
+    path.resolve(__dirname,"../../frontend/node_modules/vite/bin/vite.js"),"build"
+  ],{cwd:path.resolve(__dirname,"../../frontend"),env:{...process.env,NODE_ENV:"production",VITE_API_URL:"/"},stdio:"inherit"});
   process.env.NODE_ENV = "test";
   process.env.REQUIRE_STAFF_MFA = "true";
   process.env.JWT_SECRET = crypto.randomBytes(48).toString("hex");
@@ -107,6 +111,7 @@ async function run() {
     await p.page.getByRole("button",{name:"Issue replacement or first card",exact:true}).click();
     const card = await (await cardResponse).json();
     await d.page.goto(origin + "/emergency/card#" + card.token);
+    await d.page.getByRole("checkbox",{name:"I confirmed patient identity using hospital procedure."}).check();
     await d.page.getByPlaceholder("Detailed emergency justification for auditing...").fill("Synthetic emergency browser drill");
     await d.page.getByRole("button",{name:"Trigger Logged Emergency Access",exact:true}).click();
     await d.page.getByRole("button",{name:"View Critical Patient Data →",exact:true}).click();
