@@ -1,72 +1,88 @@
 # 🏥 GoldenHour
 
-> **Privacy-First Emergency Medical Information Access System with Web3 Wallet Auth, Patient Consent Control, AES-256-GCM Encryption, PostgreSQL Persistence, and Ethereum Blockchain Auditability.**
+> **Privacy-First Single-Hospital Emergency Medical Summary Access System with Phone OTP + Staff TOTP, Envelope Encryption (AES-256-GCM + AWS KMS), Tamper-Evident Hash-Chained Audit Logging, and Independent Erasure Ledger.**
 
-For current hospital-pilot capabilities and outstanding launch evidence, see [the release record](docs/HOSPITAL_DEPLOYMENT.md).
+For current hospital-pilot capabilities, deployment guides, and launch evidence, see [Hospital Deployment Guide](docs/HOSPITAL_DEPLOYMENT.md), [Final Scoped Plan](docs/FINAL_SCOPED_PLAN.md), and [API Reference](docs/api.md).
 
-GoldenHour is a reference implementation and engineering platform demonstrating how critical medical data can be accessed instantly in life-threatening emergencies **without sacrificing patient privacy or data sovereignty**. It is currently executing a disciplined multi-step security and architectural scale-up roadmap.
+GoldenHour provides instant access to critical medical summaries (allergies, medications, chronic conditions, blood group) in life-threatening emergencies **without sacrificing patient privacy or data sovereignty**.
 
 ---
 
 ## 🚀 Architecture Overview
 
-```
-                          ┌──────────────────────────┐
-                          │   React 18 + Vite Web App│
-                          └─────────────┬────────────┘
-                                        │ HTTPS / JSON RPC
-                                        ▼
-                          ┌──────────────────────────┐
-                          │   Express REST API Engine│
-                          │ ├── Wallet Auth (JWT)    │
-                          │ ├── Provider Lifecycle   │
-                          │ ├── Consent Enforcement  │
-                          │ └── Audit Logging        │
-                          └───────┬───────┬───────┬──┘
-                                  │       │       │
-              ┌───────────────────┘       │       └───────────────────┐
-              ▼                           ▼                           ▼
-  ┌───────────────────────┐   ┌───────────────────────┐   ┌───────────────────────┐
-  │ PostgreSQL Database   │   │ Decentralized IPFS    │   │  Ethereum / Hardhat   │
-  │ - Metadata & Indexing │   │ - Encrypted Payloads  │   │  - Smart Contracts    │
-  │ - Audit Logs & Scope  │   │ - AES-256-GCM Storage │   │  - Proof Commitments  │
-  └───────────────────────┘   └───────────────────────┘   └───────────────────────┘
+```mermaid
+flowchart TD
+  subgraph Clients ["Client Applications"]
+    PWA[Patient & Staff PWA / Mobile Browser]
+    QR[24-Hour Offline QR Emergency Card]
+  end
+
+  subgraph Gateway ["Reverse Proxy & Ingress"]
+    Caddy[Caddy Gateway / TLS / Shared Rate Limits]
+  end
+
+  subgraph Engine ["GoldenHour Backend API"]
+    Auth[Phone OTP + Staff TOTP + HttpOnly Sessions]
+    Guard[Clinical Write Guard & Idempotency Replay]
+    Clinical[Patient Summaries, Consent & Records]
+    Emergency[Break-Glass Access & 24h Review]
+    Audit[Tamper-Evident SHA-256 Audit Hash Chain]
+    KMS[Envelope Encryption / AWS KMS Key Custody]
+  end
+
+  subgraph Storage ["Private Storage (ap-south-1)"]
+    PG[(PostgreSQL Primary: Clinical Objects & Metadata)]
+    Ledger[(Independent Erasure Ledger)]
+  end
+
+  Clients --> Caddy
+  Caddy --> Auth & Guard
+  Guard --> Clinical & Emergency
+  Clinical & Emergency --> KMS
+  Clinical & Emergency --> Audit
+  KMS --> PG
+  Audit --> PG
+  Clinical --> PG
+  Emergency --> PG
+  Engine -.-> Ledger
 ```
 
 ---
 
-## ✨ Core Features & Technical Implementation
+## ✨ Core Capabilities & Engineering Hardening
 
-### 1. Web3 EIP-191 Wallet Authentication & Address Canonicalization
-- Cryptographic challenge-response authentication using random cryptographic nonces and signature verification.
-- **Strict Canonicalization:** All wallet addresses are normalized using `ethers.getAddress(...)` across authentication, database storage, and authorization queries to prevent case-sensitivity bugs or identity duplicates.
-- **Provider Role Synchronization:** Role assignment dynamically checks provider verification status. Suspended providers are automatically demoted to patient-level role access.
+### 1. Robust Authentication & Session Management
+- **Phone OTP for Patients:** 6-digit cryptographic OTP over SMS (expires in 5 minutes, 5-attempt lockout, replay protection).
+- **Staff TOTP Multi-Factor Authentication (RFC 6238):** Required for all clinical and administrative personnel with emergency recovery codes.
+- **HttpOnly Cookie Sessions:** Strict `SameSite=Strict`, `HttpOnly`, `Secure` session cookies (`gh_access` for 15-minute access, `gh_refresh_token` for 7-day rotating refresh) preventing token exposure to client-side scripts.
+- **Shared Throttling:** Distributed rate limiting backed by PostgreSQL (`http_rate_limits`) preventing brute-force attacks across clustered instances.
 
-### 2. Provider Verification & Suspension Governance (`pending` → `verified` → `suspended`)
-- **Full Governance Lifecycle:** Clinicians submit professional credentials (name, license number, specialty).
-- **Admin Control:** Administrators approve or suspend providers via dedicated endpoints (`PATCH /api/doctors/:wallet/status`).
-- **Real-Time Revocation:** Suspended providers lose access to consented records and emergency break-glass functions immediately.
+### 2. Envelope Encryption & Key Custody
+- **AES-256-GCM Encryption:** Every clinical record and sensitive field is encrypted with a unique Data Encryption Key (DEK).
+- **Authenticated Associated Data (AAD):** Cryptographically binds the ciphertext to the patient ID and record ID to prevent cross-patient injection or transposition attacks.
+- **Master Key Custody:** Key encryption keys (KEK) managed via AWS Key Management Service (AWS KMS in `ap-south-1`) or local Key Registry.
+- **Verifiable Key Destruction:** Cryptographic shredding permanently destroys DEKs on approved patient erasure, rendering past backups mathematically undecryptable.
 
-### 3. Patient-Controlled Consent Management & Scope Whitelisting
-- Patients explicitly grant and revoke record access to specific verified clinicians.
-- **Scope Whitelisting:** Consent scope is strictly validated against an allowed whitelist (`['records']`) to prevent scope injection or data pollution.
-- Clinicians can query their active consented patient grants via `GET /api/consents/provider`.
+### 3. Time-Bounded Emergency Break-Glass & Governance
+- **15-Minute Critical Window:** Verified emergency clinicians access life-saving summaries under trauma reason codes and clinical justification.
+- **View-Level Auditing:** Every individual fetch of critical data during the window logs an append-only audit event.
+- **Mandatory 24-Hour Peer Review:** Break-glass events enter an administrative review queue requiring peer clinician or administrator sign-off.
+- **Offline Emergency Card:** Encrypted 24-hour offline QR token stored locally in the PWA for emergency triage without network dependency.
 
-### 4. Time-Bounded (15-Minute) Emergency Break-Glass Workflow
-- In life-threatening situations where consent cannot be requested, verified clinicians trigger emergency break-glass access with mandatory clinical justification.
-- **View-Level Audit Logging:** Access creates a 15-minute time-bounded session. Every individual view of the critical payload triggers a dedicated audit log (`EMERGENCY_CRITICAL_VIEW`).
-- **Dynamic Re-verification:** Clinician status is re-verified upon critical data retrieval to block suspended providers from abusing active break-glass tokens.
+### 4. Tamper-Evident Audit Chain & Verified Export
+- **SHA-256 Cryptographic Hash Chain:** Audit events are linked sequentially with previous-hash anchoring.
+- **Database Trigger Lockdown:** PostgreSQL append-only triggers forbid `UPDATE` and `DELETE` on `audit_events`.
+- **Bounded Audit Export:** Administrators export cryptographically verified audit segments in CSV and PDF formats with automatic segment hash validation.
+- **Historical Attribution:** Preserves immutable hashes while joining legacy wallet actors to migrated user accounts.
 
-### 5. Encrypted Record Persistence & Payload Integrity Verification
-- Clinical records are encrypted on the backend using **AES-256-GCM** with unique initialization vectors (IV) and authentication tags before being pinned to IPFS.
-- **SHA-256 Pre-Decryption Check:** Before decrypting fetched IPFS content, the backend recomputes the SHA-256 hash of the encrypted payload and verifies it against the database record hash (`encrypted_hash`) to guard against content tampering.
+### 5. Independent Erasure Ledger & Disaster Recovery
+- **Two-Phase Erasure Protocol:** Erasure intent is committed to an independent append-only ledger prior to local deletion.
+- **Fail-Closed Outage Protection:** Primary application traffic is blocked until all ledger receipts are replayed (`assertErasureLedgerApplied`).
+- **Comprehensive Cleanup:** Purges encrypted objects, mutation replay caches, break-glass events, emergency cards, and active sessions.
 
-### 6. Dynamic, Idempotent PostgreSQL Migration System
-- Dynamic migration runner ([backend/src/config/migrate.js](file:///c:/Users/welcome/Desktop/Golden-Hour/Golden-Hour/backend/src/config/migrate.js)) automatically discovers and transactionally executes all `.sql` scripts in alphabetical order.
-- Tracks migration state using a `schema_migrations` table to ensure safe, idempotent database boots across staging and production deployments.
-
-### 7. Ethereum Smart Contract Layer
-- Solidity contracts (`PatientRegistry`, `AccessControl`, `MedicalRecord`, `EmergencyAccess`, `AuditLog`) maintain on-chain patient identity hashes, verified provider roles, record CID commitments, and emergency event logs.
+### 6. Full Multilingual Localization & Accessibility
+- **English, Tamil, and Hindi:** Native translations across all dashboards, emergency scan views, and legal notices.
+- **WCAG Accessibility:** Keyboard navigation, skip-links, high-contrast indicators, and reduced-motion support.
 
 ---
 
@@ -74,83 +90,21 @@ GoldenHour is a reference implementation and engineering platform demonstrating 
 
 | Layer | Technology |
 |---|---|
-| **Frontend** | React 18, Vite, React Router v6, QRCode.react, Ethers.js v6 |
-| **Backend** | Node.js 20+, Express.js, Helmet, Express-Rate-Limit, JSON Web Tokens (JWT) |
-| **Database** | PostgreSQL 16 (`pg`), Idempotent SQL Migrations |
-| **Storage & Security** | AES-256-GCM Encryption, IPFS / Pinata API Gateway |
-| **Smart Contracts** | Solidity 0.8.24, Hardhat, OpenZeppelin Contracts v5 |
-| **DevOps & CI** | Docker, Docker Compose, GitHub Actions |
-
----
-
-## 🗄️ Database Schema & Migrations
-
-The database setup uses transactional PostgreSQL migrations located in `backend/migrations/`:
-
-| Migration File | Purpose | Key Tables Created |
-|---|---|---|
-| `001_initial.sql` | Base schema setup | `patients`, `providers`, `records`, `audit_logs` |
-| `002_consents.sql` | Patient-provider consent framework | `patient_provider_consents` |
-
-### Table Definitions Overview
-
-- **`patients`**: Stores patient UUID, canonical wallet address, profile JSON, and critical medical JSON.
-- **`providers`**: Tracks clinician credentials, verification status (`pending`, `verified`, `suspended`), and verifier metadata.
-- **`records`**: Stores encrypted IPFS payload CIDs, record types, clinician IDs, and SHA-256 payload hashes.
-- **`patient_provider_consents`**: Tracks active/revoked patient-to-provider access grants and scope arrays.
-- **`audit_logs`**: Append-only log of security, access, and break-glass emergency actions with metadata and timestamps.
-
-Run migrations against a PostgreSQL database:
-```bash
-npm --prefix backend run db:migrate
-```
-
----
-
-## ⚙️ REST API Reference
-
-### Authentication & Self-Identity
-- `GET  /api/auth/nonce/:wallet` — Generate authentication nonce for wallet signature.
-- `POST /api/auth/verify` — Verify EIP-191 signature and issue JWT bearer token.
-
-### Patient Management
-- `GET  /api/patients/me` — Fetch current authenticated patient identity.
-- `POST /api/patients` — Register new patient identity and critical medical context.
-- `PUT  /api/patients/:id` — Update profile or critical medical info (triggers smart contract hash sync).
-- `GET  /api/patients/all` — Admin route to list registered patient identities.
-- `GET  /api/patients/:id` — Retrieve patient profile, records timeline, and audit logs.
-
-### Provider Management
-- `GET  /api/doctors/access` — Fetch current authenticated provider status and clinical permissions.
-- `POST /api/doctors/register` — Register clinician account (`pending` status).
-- `GET  /api/doctors` — List registered providers filtered by status (Admin only).
-- `POST /api/doctors/:wallet/verify` — Approve provider account (`verified` status, Admin only).
-- `PATCH /api/doctors/:wallet/status` — Update provider status (`pending`, `verified`, `suspended`, Admin only).
-
-### Consent Management
-- `GET  /api/consents/provider` — List active patients who granted consent to the calling clinician.
-- `GET  /api/consents/:patientId` — List active/revoked consents for a patient.
-- `POST /api/consents/:patientId` — Grant access consent to a verified clinician (`scope: ["records"]`).
-- `POST /api/consents/:patientId/revoke` — Revoke access consent from a clinician.
-
-### Encrypted Records
-- `POST /api/records` — Encrypt clinical JSON, pin to IPFS, and save record (Requires active consent).
-- `GET  /api/records/:patientId` — List encrypted records for a patient.
-- `GET  /api/records/:patientId/:recordId` — Fetch from IPFS, verify payload hash, decrypt and return data.
-
-### Emergency Access & Audit
-- `POST /api/emergency-access` — Trigger 15-minute emergency break-glass session with justification.
-- `GET  /api/emergency-access/critical/:accessId` — Retrieve critical medical payload (Audited on every fetch).
-- `GET  /api/emergency-access/recent/all` — List recent emergency audit events across all patients (Admin only).
+| **Frontend** | React 18, Vite, React Router v6, QRCode.react, jsQR (on-device camera decoding) |
+| **Backend** | Node.js 24+, Express.js, Helmet, Express-Rate-Limit, JSON Web Tokens (JWT), OTPAuth |
+| **Database** | PostgreSQL 18 / 16 (`pg`), Idempotent SQL Migrations (001–018) |
+| **Cryptography** | AES-256-GCM Envelope Encryption, SHA-256 Audit Hash Chain, AWS KMS SDK |
+| **DevOps & Ingress**| Caddy Gateway (TLS / HSTS / Permissions-Policy), Docker, Terraform (ap-south-1) |
+| **Testing** | Node Test Runner (`node:test`), Playwright (Chromium), Supertest |
 
 ---
 
 ## 🚦 Local Setup & Running Instructions
 
 ### Prerequisites
-- Node.js >= 20.0.0
+- Node.js >= 24.0.0
 - npm >= 10.0.0
-- Docker & Docker Compose (or local PostgreSQL)
+- PostgreSQL >= 16 (or Docker Compose)
 
 ### 1. Repository Setup & Dependencies
 ```bash
@@ -164,73 +118,44 @@ Copy `.env.example` to `backend/.env`:
 ```bash
 cp backend/.env.example backend/.env
 ```
-Generate a 256-bit symmetric encryption key:
+Generate secure keys:
 ```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
-```
-Update `backend/.env`:
-```env
-PORT=4000
-JWT_SECRET=your-secure-random-jwt-secret
-ENCRYPTION_KEY=your-generated-base64-encryption-key
-FRONTEND_ORIGIN=http://localhost:5173
-DATABASE_URL=postgresql://goldenhour:goldenhour-dev-only@localhost:5432/goldenhour
-ADMIN_WALLETS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+node -e "console.log('JWT_SECRET=' + require('crypto').randomBytes(32).toString('hex'))"
+node -e "console.log('ENCRYPTION_KEY=' + require('crypto').randomBytes(32).toString('base64'))"
 ```
 
 ### 3. Run Database Migrations
-Start local Postgres database and run migrations:
 ```bash
 npm --prefix backend run db:migrate
 ```
 
-### 4. Compile & Deploy Smart Contracts (Optional Local Node)
+### 4. Start Development Servers
 ```bash
-npm run compile
-npm run node
-# In a separate terminal:
-npm run deploy:local
-```
-
-### 5. Start Backend & Frontend Development Servers
-```bash
+# Terminal 1: Backend API
 npm run backend
-# In a separate terminal:
+
+# Terminal 2: Frontend PWA
 npm run frontend
 ```
 - **Frontend App:** `http://localhost:5173`
-- **Backend API:** `http://localhost:4000/health`
-
----
-
-For Vercel, follow [the Vercel setup guide](docs/VERCEL_DEPLOYMENT.md).
-
-## 🐳 Docker Deployment
-
-For local development, run `docker compose -f docker-compose.dev.yml up --build`. For a single-hospital staging deployment, see [deployment and verification](docs/HOSPITAL_DEPLOYMENT.md). The default Compose file expects a private TLS database and a public hostname.
+- **Backend API Health:** `http://localhost:4000/health`
 
 ---
 
 ## 🧪 Quality Assurance & Test Verification
 
-GoldenHour includes comprehensive test coverage across backend integration, smart contracts, and frontend modules:
+GoldenHour maintains a unified automated verification pipeline:
 
 ```bash
-# Run backend integration tests
-npm --prefix backend test
+# Run full 5-gate baseline verification (backend tests, frontend tests, builds, secret scan)
+npm run verify:code
 
-# Run Solidity smart contract tests
-npx hardhat test
-
-# Run frontend Vitest suite
-npm --prefix frontend test
-
-# Validate full production frontend build
-npm --prefix frontend run build
+# Run live PostgreSQL integration tests (requires local or test database)
+npm --prefix backend run test:postgres
 ```
 
 ---
 
 ## 📄 License & Clinical Notice
 
-> ⚠️ **Clinical Safety Notice:** GoldenHour is an advanced architectural and engineering portfolio demonstration. It must undergo independent clinical review, legal compliance audit (HIPAA/GDPR), and formal penetration testing prior to deployment in real healthcare settings.
+> ⚠️ **Clinical Safety Notice:** GoldenHour v1 is engineered for single-hospital deployment in India (`ap-south-1`). Prior to real-patient deployment, independent penetration testing, clinical workflow approval, and statutory legal sign-off are required.

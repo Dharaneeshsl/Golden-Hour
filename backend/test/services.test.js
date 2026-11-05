@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const encryption = require("../src/services/encryptionService");
-const ipfs = require("../src/services/ipfsService");
+
 const { canonicalJsonStringify } = require("../src/controllers/recordController");
 
 test("encryptionService encrypts and decrypts clinical JSON data accurately", () => {
@@ -24,12 +24,5 @@ test("canonicalJsonStringify produces deterministic sorted JSON strings", () => 
   assert.equal(
     canonicalJsonStringify(obj1),
     '{"a":2,"m":{"x":"a","y":"b"},"z":1}'
-  );
-});
-
-test("ipfsService fetchEncrypted rejects invalid CID formats", async () => {
-  await assert.rejects(
-    async () => ipfs.fetchEncrypted("../path/injection"),
-    /Invalid IPFS CID/
   );
 });

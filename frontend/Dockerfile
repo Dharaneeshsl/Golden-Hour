@@ -1,26 +1,13 @@
-FROM node:24.22.0-alpine
+FROM node:24.22.0-alpine AS build
 WORKDIR /app
-
-# Vite inlines VITE_* vars at build time, so they must be passed as build ARGs
-# and re-exported as ENV before `npm run build` runs.
-ARG VITE_API_URL=http://localhost:4000
-ARG VITE_REGISTRY_ADDRESS=
-ARG VITE_ACCESS_CONTROL_ADDRESS=
-ARG VITE_RECORDS_ADDRESS=
-ARG VITE_AUDIT_ADDRESS=
-ARG VITE_EMERGENCY_ADDRESS=
-ENV VITE_API_URL=$VITE_API_URL \
-    VITE_REGISTRY_ADDRESS=$VITE_REGISTRY_ADDRESS \
-    VITE_ACCESS_CONTROL_ADDRESS=$VITE_ACCESS_CONTROL_ADDRESS \
-    VITE_RECORDS_ADDRESS=$VITE_RECORDS_ADDRESS \
-    VITE_AUDIT_ADDRESS=$VITE_AUDIT_ADDRESS \
-    VITE_EMERGENCY_ADDRESS=$VITE_EMERGENCY_ADDRESS
-
+ARG VITE_API_URL=/
+ENV VITE_API_URL=$VITE_API_URL
 COPY package*.json ./
 RUN npm ci
 COPY . .
 RUN npm run build
 
-RUN npm install -g serve
+FROM caddy:2-alpine
+COPY Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /app/dist /srv
 EXPOSE 3000
-CMD ["serve", "-s", "dist", "-l", "3000"]

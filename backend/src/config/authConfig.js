@@ -36,7 +36,9 @@ function getAdminWallets() {
     .map((x) => x.trim())
     .filter(Boolean);
 
-  return raw.map(canonicalizeWallet);
+  const users = (process.env.ADMIN_USER_IDS || "").split(",").map(value=>value.trim()).filter(Boolean);
+  if (users.some(value=>!/^[a-f0-9-]{36}$/i.test(value))) throw new Error("Invalid administrator identity configuration");
+  return [...raw.map(canonicalizeWallet),...users.map(id=>"user:"+id)];
 }
 
 function isCurrentAdmin(wallet) {

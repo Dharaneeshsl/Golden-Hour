@@ -1,3 +1,5 @@
+const {keySet} = require("../utils/keySet");
+const {getKeySet} = require("./encryptionService");
 const crypto = require("crypto");
 const { VaultKeyService } = require("./vaultKeyService");
 
@@ -18,35 +20,26 @@ function canonicalAAD(value) {
 }
 
 class EnvelopeEncryptionService {
-  constructor(masterKeyHex = process.env.KMS_MASTER_KEY, store = null, keyService = null) {
-    this.keyService = keyService || (process.env.VAULT_ADDR ? new VaultKeyService() : null);
-    let keyBuf = null;
-    if (masterKeyHex) {
-      keyBuf = Buffer.from(masterKeyHex, "hex");
-    } else if (process.env.ENCRYPTION_KEY) {
-      const envKey = process.env.ENCRYPTION_KEY.trim();
-      if (/^[0-9a-fA-F]{64}$/.test(envKey)) {
-        keyBuf = Buffer.from(envKey, "hex");
-      } else {
-        const b = Buffer.from(envKey, "base64");
-        if (b.length === 32) keyBuf = b;
-      }
+  constructor(masterKeyHex=process.env.KMS_MASTER_KEY,store=null,keyService=null,wrappingKeys=null) {
+    if (!keyService && process.env.AWS_KMS_KEY_ID && process.env.VAULT_ADDR) throw new Error("Choose one active patient-key custody provider");
+    this.keyService=keyService || (process.env.AWS_KMS_KEY_ID ? new (require("./awsKmsKeyService").AwsKmsKeyService)() : process.env.VAULT_ADDR ? new VaultKeyService() : null);
+    this.wrappingKeys=wrappingKeys;
+    if (!this.wrappingKeys) {
+      if (masterKeyHex) this.wrappingKeys=keySet(masterKeyHex,process.env.KMS_MASTER_KEY_ID || "legacy",process.env.KMS_MASTER_KEYRING_JSON || "{}");
+      else if (process.env.ENCRYPTION_KEY) this.wrappingKeys=getKeySet();
+      else if (!this.keyService && process.env.NODE_ENV!=="production") this.wrappingKeys=keySet(crypto.randomBytes(32).toString("hex"));
+      else if (!this.keyService) throw new Error("A verified 32-byte wrapping key is required");
     }
+    this.masterKey=this.wrappingKeys?.activeKey;
+    this.store=store;
+    this.memoryKeys=new Map();
+  }
 
-    if (keyBuf && keyBuf.length !== 32) throw new Error("Legacy master key must be 32 bytes");
-    if ((!keyBuf || keyBuf.length !== 32) && !this.keyService) {
-      if (process.env.NODE_ENV === "production") {
-        throw new Error(
-          "KMS Root Key (KMS_MASTER_KEY or ENCRYPTION_KEY) must be a verified 256-bit (32-byte) key in production"
-        );
-      }
-      // Non-production transient key; never uses a hardcoded fallback string
-      keyBuf = crypto.randomBytes(32);
-    }
-
-    this.masterKey = keyBuf;
-    this.store = store;
-    this.memoryKeys = new Map();
+  wrapLocal(raw) {
+    const iv=crypto.randomBytes(12);
+    const cipher=crypto.createCipheriv("aes-256-gcm",this.wrappingKeys.activeKey,iv);
+    const ciphertext=Buffer.concat([cipher.update(raw),cipher.final()]);
+    return ["local",this.wrappingKeys.activeId,iv.toString("base64"),cipher.getAuthTag().toString("base64"),ciphertext.toString("base64")].join(":");
   }
 
   setStore(store) {
@@ -60,9 +53,12 @@ class EnvelopeEncryptionService {
     if (this.store?.transaction && !this.store.inTransaction && process.env.NODE_ENV === "production") {
       return this.store.transaction(async tx => {
         await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [patientId]);
-        const scoped = new EnvelopeEncryptionService(this.masterKey?.toString("hex"), tx, this.keyService);
+        const scoped = new EnvelopeEncryptionService(this.masterKey?.toString("hex"), tx, this.keyService, this.wrappingKeys);
         return scoped.generatePatientDEK(patientId);
       });
+    }
+    if (this.store?.inTransaction && process.env.NODE_ENV === "production") {
+      await this.store.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[patientId]);
     }
     // Concurrency guard: check if another thread/instance created a key in the interim
     if (this.store && this.store.getKeyRecord) {
@@ -79,10 +75,7 @@ class EnvelopeEncryptionService {
     if (this.keyService) {
       packedEnvelope = await this.keyService.wrap(rawDEK);
     } else {
-      const iv = crypto.randomBytes(12);
-      const cipher = crypto.createCipheriv("aes-256-gcm", this.masterKey, iv);
-      const wrappedDEK = Buffer.concat([cipher.update(rawDEK), cipher.final()]);
-      packedEnvelope = `${iv.toString("base64")}:${cipher.getAuthTag().toString("base64")}:${wrappedDEK.toString("base64")}`;
+      packedEnvelope = this.wrapLocal(rawDEK);
     }
 
     const record = {
@@ -106,19 +99,25 @@ class EnvelopeEncryptionService {
   /**
    * Retrieves and unwraps the raw DEK for a patient directly from key_registry
    */
-  async unwrapPatientDEK(patientId) {
+  async unwrapPatientDEK(patientId, keyId) {
     let record = null;
     if (this.store && this.store.getKeyRecord) {
-      record = await this.store.getKeyRecord(patientId);
+      record = keyId && this.store.getKeyRecordById ? await this.store.getKeyRecordById(patientId,keyId) : await this.store.getKeyRecord(patientId);
     } else if (this.memoryKeys.has(patientId)) {
       record = this.memoryKeys.get(patientId);
+      if (keyId && keyId!=="key_default" && keyId!==record.keyId) throw new Error("Missing historical patient key");
     }
 
     // If key does not exist yet in key_registry, generate one
     if (!record) {
+      if (keyId) throw new Error("Missing historical patient key");
       record = await this.generatePatientDEK(patientId);
     }
 
+    return this.unwrapKeyRecord(record);
+  }
+
+  async unwrapKeyRecord(record) {
     // Verify key status and cryptographic destruction
     const cipherText = record.encryptedDEK || record.encrypted_dek || "";
     if (record.status === "shredded" || cipherText.includes("CRYPTO_SHREDDED") || !cipherText.includes(":")) {
@@ -128,27 +127,23 @@ class EnvelopeEncryptionService {
     // If generated in-process, return rawDEK directly
     if (record.rawDEK) return record.rawDEK;
 
+    if (cipherText.startsWith("aws-kms:")) {
+      if (!this.keyService) throw new Error("AWS KMS is required to unwrap this key");
+      return this.keyService.unwrap(cipherText);
+    }
     if (cipherText.startsWith("vault:")) {
       if (!this.keyService) throw new Error("Vault is required to unwrap this key");
       return this.keyService.unwrap(cipherText);
     }
-    if (!this.masterKey) throw new Error("Legacy wrapping key required for migration");
-    const parts = cipherText.split(":");
-    if (parts.length !== 3) {
-      throw new Error("Invalid or corrupted wrapped DEK format in key_registry");
-    }
-
-    const [ivB64, tagB64, cipherB64] = parts;
-    const decipher = crypto.createDecipheriv(
-      "aes-256-gcm",
-      this.masterKey,
-      Buffer.from(ivB64, "base64")
-    );
-    decipher.setAuthTag(Buffer.from(tagB64, "base64"));
-    const rawDEK = Buffer.concat([
-      decipher.update(Buffer.from(cipherB64, "base64")),
-      decipher.final(),
-    ]);
+    const parts=cipherText.split(":");
+    const local=parts[0]==="local";
+    if ((local && parts.length!==5) || (!local && parts.length!==3)) throw new Error("Invalid wrapped key format");
+    const key=this.wrappingKeys?.keys.get(local ? parts[1] : "legacy");
+    if (!key) throw new Error("Required historical wrapping key is unavailable");
+    const [ivB64,tagB64,cipherB64]=local ? parts.slice(2) : parts;
+    const decipher=crypto.createDecipheriv("aes-256-gcm",key,Buffer.from(ivB64,"base64"));
+    decipher.setAuthTag(Buffer.from(tagB64,"base64"));
+    const rawDEK=Buffer.concat([decipher.update(Buffer.from(cipherB64,"base64")),decipher.final()]);
 
     return rawDEK;
   }
@@ -192,7 +187,7 @@ class EnvelopeEncryptionService {
     if (!payload || payload.algorithm !== "aes-256-gcm") {
       throw new Error("Unsupported encrypted payload specification");
     }
-    const dek = await this.unwrapPatientDEK(patientId);
+    const dek = await this.unwrapPatientDEK(patientId,payload.keyId);
     const decipher = crypto.createDecipheriv(
       "aes-256-gcm",
       dek,

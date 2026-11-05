@@ -1,9 +1,13 @@
+const {validatedRouter} = require("../utils/validatedRouter");
 const express = require("express");
 const { requireAuth } = require("../middleware/authMiddleware");
 
 module.exports = (controller) => {
-  const router = express.Router();
+  const router = validatedRouter();
 
+  router.get("/audit-export", requireAuth, controller.auditExport);
+  router.get("/me/requests", requireAuth, controller.myRequests);
+  router.post("/requests/:id/resolve", requireAuth, controller.resolveRequest);
   router.get("/requests", requireAuth, controller.requests);
   router.put("/holds/:patientId", requireAuth, controller.hold);
   router.get("/me/archive", requireAuth, controller.archive);

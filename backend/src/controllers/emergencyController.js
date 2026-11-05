@@ -1,3 +1,5 @@
+const {pagination,pageResponse,memoryPage} = require("../utils/pagination");
+const {ownsPatient} = require("../utils/identity");
 const crypto = require("crypto");
 const { canonicalizeWallet } = require("../config/db");
 const { AuditChainService } = require("../services/auditChainService");
@@ -23,7 +25,7 @@ function checkProviderRateLimit(providerWallet) {
 function createEmergencyController({ store, chain, envelopeEncryption, auditChain }) {
   const canAudit = (req, patient) =>
     req.user.role === "admin" ||
-    canonicalizeWallet(patient.wallet) === canonicalizeWallet(req.user.wallet);
+    ownsPatient(patient,req.user);
 
   return {
     create: asyncHandler(async (req, res) => {
@@ -48,9 +50,9 @@ function createEmergencyController({ store, chain, envelopeEncryption, auditChai
         return res.status(403).json({ error: "Provider account is not active or verified" });
       }
 
-      const providerWallet = canonicalizeWallet(req.provider.wallet);
+      const providerWallet = canonicalizeWallet(req.user.wallet);
       // B7: Enforce provider rate limits on break-glass requests
-      const withinQuota = store.emergencyQuota ? await store.emergencyQuota(providerWallet, MAX_ATTEMPTS_PER_WINDOW) : checkProviderRateLimit(providerWallet);
+      const withinQuota = await store.emergencyQuota(providerWallet, MAX_ATTEMPTS_PER_WINDOW);
       if (!withinQuota) {
         return res.status(429).json({
           error: "Break-glass rate limit exceeded. Maximum 5 emergency requests per 15 minutes.",
@@ -141,7 +143,7 @@ function createEmergencyController({ store, chain, envelopeEncryption, auditChai
           audit: event,
         });
       } catch (e) {
-        console.error("Emergency create error:", e);
+        console.error("Emergency create error:", {name:e.name, code:e.code || "INTERNAL_ERROR"});
         res.status(502).json({ error: "Emergency access trigger failed" });
       }
     }),
@@ -215,16 +217,20 @@ function createEmergencyController({ store, chain, envelopeEncryption, auditChai
         return res.status(403).json({ error: "Audit access denied" });
       }
 
-      const audits = await store.auditForPatient(patient.id);
-      res.json(audits);
+      const page = pagination(req.query);
+      const rows = store.listAuditPage ? await store.listAuditPage(patient.id,page)
+        : memoryPage(await store.auditForPatient(patient.id),page);
+      return pageResponse(res,rows,page);
     }),
 
     recentAudits: asyncHandler(async (req, res) => {
       if (req.user.role !== "admin") {
         return res.status(403).json({ error: "Admin authorization required" });
       }
-      const limit = parseInt(req.query.limit, 10) || 50;
-      res.json(await store.recentAudits(limit));
+      const page = pagination(req.query);
+      const rows = store.listAuditPage ? await store.listAuditPage(null,page)
+        : memoryPage(await store.recentAudits(100001),page);
+      return pageResponse(res,rows,page);
     }),
 
     // B7: Review queue endpoints for post-hoc clinical review
@@ -232,11 +238,11 @@ function createEmergencyController({ store, chain, envelopeEncryption, auditChai
       if (req.user.role !== "admin") {
         return res.status(403).json({ error: "Admin or reviewer authorization required" });
       }
-      const limit = parseInt(req.query.limit, 10) || 50;
-      const offset = parseInt(req.query.offset, 10) || 0;
-      const pending = await store.getPendingBreakGlassReviews(limit, offset);
-      res.json(pending.map(({id, facility, reasonCode, reason_code, createdAt, created_at}) =>
-        ({id, facility, reasonCode: reasonCode || reason_code, createdAt: createdAt || created_at})));
+      const page = pagination(req.query);
+      const pending = store.listReviewsPage ? await store.listReviewsPage(page)
+        : memoryPage(await store.getPendingBreakGlassReviews(100001,0),page);
+      return pageResponse(res,pending.map(({id,facility,reasonCode,reason_code,createdAt,created_at}) =>
+        ({id,facility,reasonCode:reasonCode || reason_code,createdAt:createdAt || created_at})),page);
     }),
 
     submitReview: asyncHandler(async (req, res) => {

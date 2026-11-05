@@ -3,21 +3,24 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { ethers } = require("ethers");
 const { getAdminWallets, getJwtSecret } = require("../config/authConfig");
+const {PhoneAuthService,subjectId} = require("../services/phoneAuthService");
+const {cookieValue,accessCookie} = require("../utils/authCookies");
 const { MfaService } = require("../services/mfaService");
 const { asyncHandler } = require("../utils/asyncHandler");
 
 const TTL = 5 * 60 * 1000;
 
-function parseCookie(cookieHeader, name) {
-  if (!cookieHeader) return null;
-  const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : null;
-}
 
-module.exports = ({ store }) => {
+
+module.exports = ({ store, otpProvider }) => {
   const router = express.Router();
 
   async function issueSession(req, res, wallet, mfaVerified = false, recoveryCodes) {
+    const userId = subjectId(wallet);
+    if (userId) {
+      const account = (await store.query("SELECT status FROM users WHERE id=$1",[userId])).rows[0];
+      if (!account || account.status!=="active") return res.status(401).json({error:"Account unavailable"});
+    }
     const admins = getAdminWallets();
     const provider = await store.providerByWallet(wallet);
     const patient = await store.patientByWallet(wallet);
@@ -41,6 +44,7 @@ module.exports = ({ store }) => {
       await store.createSession({
         id: sessionId,
         wallet,
+        userId,
         mfaVerified,
         tokenHash,
         ipAddress: req.ip,
@@ -49,7 +53,7 @@ module.exports = ({ store }) => {
       });
     }
 
-    const user = { wallet, role, patientId: patient ? patient.id : null, sessionId, mfaVerified };
+    const user = { wallet, userId, role, patientId: patient ? patient.id : null, sessionId, mfaVerified };
     const secret = getJwtSecret();
     const token = jwt.sign(user, secret, {
       expiresIn: "15m",
@@ -65,8 +69,24 @@ module.exports = ({ store }) => {
       }`
     );
 
-    res.json({ token, user, sessionId, recoveryCodes });
+        const cookies = res.getHeader("Set-Cookie") || [];
+    res.setHeader("Set-Cookie",[...(Array.isArray(cookies)?cookies:[cookies]),accessCookie(token)]);
+    res.json({...(userId ? {} : {token}),user,sessionId,recoveryCodes});
   }
+
+  const phoneAuth = new PhoneAuthService(store,otpProvider);
+  router.post("/phone/request",asyncHandler(async (req,res) => {
+    try {res.status(202).json(await phoneAuth.request(req.body?.phone));}
+    catch (error) {res.status(error.status || 503).json({error:error.status ? error.message : "Phone sign-in service unavailable. Please try again."});}
+  }));
+  router.post("/phone/verify",asyncHandler(async (req,res) => {
+    let account;
+    try {account=await phoneAuth.verify(req.body?.challengeId,req.body?.code);}
+    catch {return res.status(401).json({error:"Invalid, expired, or already used code"});}
+    const staff = getAdminWallets().includes(account.subject) || await store.providerByWallet(account.subject);
+    if (staff) return res.json(await new MfaService(store).challenge(account.subject));
+    return issueSession(req,res,account.subject);
+  }));
 
   router.post("/mfa/setup", asyncHandler(async (req,res) => {
     try { res.json(await new MfaService(store).setup(req.body?.mfaToken)); }
@@ -81,6 +101,7 @@ module.exports = ({ store }) => {
 
   // B10: SIWE (EIP-4361) Compliant Nonce Generation with Domain Binding
   router.get("/nonce/:wallet", asyncHandler(async (req, res) => {
+    if (process.env.NODE_ENV==="production" && process.env.WALLET_AUTH_ENABLED!=="true") return res.sendStatus(404);
     const rawWallet = req.params.wallet;
     if (!ethers.isAddress(rawWallet)) {
       return res.status(400).json({ error: "A valid Ethereum wallet address is required" });
@@ -111,6 +132,7 @@ module.exports = ({ store }) => {
 
   // B10 & B11: SIWE Verification, Short Access Tokens, Rotating Refresh Tokens & Server Sessions
   router.post("/verify", asyncHandler(async (req, res) => {
+    if (process.env.NODE_ENV==="production" && process.env.WALLET_AUTH_ENABLED!=="true") return res.sendStatus(404);
     const { wallet: rawWallet, signature, message: clientMessage } = req.body || {};
     if (!rawWallet || !ethers.isAddress(rawWallet) || !signature) {
       return res.status(400).json({ error: "wallet and signature are required" });
@@ -147,7 +169,7 @@ module.exports = ({ store }) => {
   // B11: Refresh Token Rotation
   router.post("/refresh", asyncHandler(async (req, res) => {
     const refreshToken =
-      parseCookie(req.headers.cookie, "gh_refresh_token") || req.body?.refreshToken;
+      cookieValue(req.headers.cookie, "gh_refresh_token") || req.body?.refreshToken;
 
     if (!refreshToken) {
       return res.status(401).json({ error: "Refresh token required" });
@@ -173,7 +195,7 @@ module.exports = ({ store }) => {
     const newTokenHash = crypto.createHash("sha256").update(newRefreshToken).digest("hex");
 
     const userWallet = session.wallet;
-    if (!ethers.isAddress(userWallet) || !await store.rotateRefresh(session.id, tokenHash, newTokenHash)) {
+    if (!userWallet || !await store.rotateRefresh(session.id, tokenHash, newTokenHash)) {
       return res.status(401).json({error: "Refresh token expired or already used"});
     }
     const patient = await store.patientByWallet(userWallet);
@@ -184,7 +206,7 @@ module.exports = ({ store }) => {
 
     const secret = getJwtSecret();
     const newToken = jwt.sign(
-      { wallet: userWallet, role, patientId, sessionId: session.id, mfaVerified: session.mfa_verified || false },
+      { wallet: userWallet, userId:subjectId(userWallet), role, patientId, sessionId: session.id, mfaVerified: session.mfa_verified || false },
       secret,
       { expiresIn: "15m", algorithm: "HS256", issuer: "goldenhour" }
     );
@@ -196,12 +218,13 @@ module.exports = ({ store }) => {
       }`
     );
 
-    res.json({ token: newToken });
+    res.setHeader("Set-Cookie",[res.getHeader("Set-Cookie"),accessCookie(newToken)]);
+    res.json(subjectId(userWallet) ? {refreshed:true} : {token:newToken});
   }));
 
   // B11: Server-side Session Revocation & Logout
   router.post("/logout", asyncHandler(async (req, res) => {
-    const authHeader = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+    const authHeader = (req.headers.authorization || "").replace(/^Bearer\s+/i, "") || cookieValue(req.headers.cookie,"gh_access");
     let sessionId = null;
 
     if (authHeader) {
@@ -214,7 +237,7 @@ module.exports = ({ store }) => {
     }
 
     if (!sessionId) {
-      const refreshToken = parseCookie(req.headers.cookie, "gh_refresh_token");
+      const refreshToken = cookieValue(req.headers.cookie, "gh_refresh_token");
       if (refreshToken && store.getSessionByHash) {
         const hash = crypto.createHash("sha256").update(refreshToken).digest("hex");
         const session = await store.getSessionByHash(hash);
@@ -229,7 +252,7 @@ module.exports = ({ store }) => {
     // Clear cookie
     res.setHeader(
       "Set-Cookie",
-      "gh_refresh_token=; Path=/api/auth; HttpOnly; SameSite=Strict; Max-Age=0"
+      ["gh_refresh_token=; Path=/api/auth; HttpOnly; SameSite=Strict; Max-Age=0","gh_access=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"]
     );
 
     res.json({ message: "Session revoked and logged out successfully" });

@@ -8,13 +8,13 @@ services:
       DB_SSL: "true"
       DB_CA: /run/secrets/db_ca
     secrets: [db_ca]
-    command: ["node", "src/config/migrate.js"]
+    command: ["node", "dist/migrate.js"]
   backend:
     build: ./backend
     restart: unless-stopped
     depends_on:
       migrate: {condition: service_completed_successfully}
-    environment:
+    environment: &runtime_environment
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:?Set runtime credentials}
       DB_SSL: "true"
@@ -25,7 +25,10 @@ services:
       VAULT_TOKEN_FILE: /run/vault/token
       KMS_MASTER_KEY: ${KMS_MASTER_KEY:?Set wrapping key}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set record encryption key}
-      ADMIN_WALLETS: ${ADMIN_WALLETS:?Set hospital administrator}
+      ADMIN_USER_IDS: ${ADMIN_USER_IDS:?Set hospital administrator user IDs}
+      MSG91_AUTH_KEY: ${MSG91_AUTH_KEY:?Set SMS provider credential}
+      MSG91_FLOW_ID: ${MSG91_FLOW_ID:?Set approved SMS flow}
+      WALLET_AUTH_ENABLED: "false"
       HOSPITAL_NAME: ${HOSPITAL_NAME:?Set hospital display name}
       FRONTEND_ORIGIN: https://${PUBLIC_HOST:?Set hospital hostname}
       AUTH_DOMAIN: ${PUBLIC_HOST}
@@ -34,7 +37,22 @@ services:
     secrets: [db_ca]
     volumes:
       - ${VAULT_TOKEN_DIR:-./deploy/empty-vault}:/run/vault:ro
-    command: ["node", "src/app.js"]
+    command: ["node", "dist/app.js"]
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    environment: *runtime_environment
+    secrets: [db_ca]
+    volumes:
+      - ${VAULT_TOKEN_DIR:-./deploy/empty-vault}:/run/vault:ro
+    command: ["node", "dist/worker.js"]
+    healthcheck:
+      test: ["CMD", "node", "dist/worker-health.js"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
   frontend:
     build:
       context: ./frontend

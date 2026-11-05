@@ -1,9 +1,10 @@
+const {validatedRouter} = require("../utils/validatedRouter");
 const express = require("express");
 const { requireAuth } = require("../middleware/authMiddleware");
 const { requireRole } = require("../middleware/roleCheck");
 
 module.exports = (c) => {
-  const r = express.Router();
+  const r = validatedRouter();
   r.post("/invitations", requireAuth, c.invite);
   r.post("/register", requireAuth, c.register);
   r.get("/access", requireAuth, c.access);

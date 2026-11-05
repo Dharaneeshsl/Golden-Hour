@@ -1,0 +1,12 @@
+import {useEffect,useRef,useState} from "react";
+import {api} from "../api";
+import {parseStaffCsv} from "../utils/staffCsv";
+export default function StaffImport(){
+ const [rows,setRows]=useState([]),[error,setError]=useState(""),[busy,setBusy]=useState(false),[results,setResults]=useState({});
+ const mounted=useRef(true);useEffect(()=>{mounted.current=true;return ()=>{mounted.current=false;};},[]);
+ async function preview(event){setError("");setRows([]);setResults({});try{const file=event.target.files?.[0];if(!file)return;if(file.size>65536)throw new Error("CSV must be 64 KB or smaller.");const parsed=parseStaffCsv(await file.text());if(mounted.current)setRows(parsed);}catch(err){if(mounted.current)setError(err.message);}}
+ async function invite(){setBusy(true);setError("");try{for(const row of rows){if(!mounted.current)break;if(row.error||results[row.phone]?.token)continue;try{const result=await api.inviteStaff(row.phone);if(mounted.current)setResults(previous=>({...previous,[row.phone]:result}));}catch(err){if(mounted.current)setResults(previous=>({...previous,[row.phone]:{error:err.message}}));if([401,403,429,503].includes(err.status))break;}}}finally{if(mounted.current)setBusy(false);}}
+ return <section className="panel"><h3>Import staff invitations</h3><p>Upload a CSV with one column named phone and up to 100 +91 mobile numbers. Review the preview, then create invitations. Each invitation is audited; no SMS or email is sent by this importer.</p><label>Staff CSV<input type="file" accept=".csv,text/csv" disabled={busy} onChange={preview}/></label>
+ {error&&<p role="alert">{error}</p>}{rows.length>0&&<><table><thead><tr><th>Row</th><th>Phone</th><th>Result</th></tr></thead><tbody>{rows.map(row=><tr key={row.line}><td>{row.line}</td><td>{row.phone}</td><td>{row.error||results[row.phone]?.error||(results[row.phone]?.token?<><p>Created · expires {new Date(results[row.phone].expiresAt).toLocaleString()}</p><code>{results[row.phone].token}</code></>:"Ready")}</td></tr>)}</tbody></table><button disabled={busy||!rows.some(row=>!row.error&&!results[row.phone]?.token)} onClick={invite}>{busy?"Creating invitations…":"Create invitations for valid rows"}</button><p>Share each one-use token through your hospital’s approved channel. Tokens remain visible only until this screen is closed. Retry uncertain results using the original action before importing again.</p></>}
+ </section>;
+}

@@ -3,33 +3,17 @@ require("dotenv").config({ path: path.join(__dirname, "../../.env") });
 require("dotenv").config();
 const fs = require("fs");
 const { Pool } = require("pg");
+const {databaseOptions} = require("./databaseOptions");
 
 if (!process.env.DATABASE_URL && require.main === module) {
   throw new Error("DATABASE_URL required for running database migrations");
 }
 
-function getDbSslConfig() {
-  if (process.env.DB_SSL !== "true") return undefined;
-  const ca = process.env.DB_CA_PEM || (process.env.DB_CA ? fs.readFileSync(process.env.DB_CA,"utf8") : undefined);
-  if (process.env.NODE_ENV === "production" && (!ca || process.env.DB_REJECT_UNAUTHORIZED === "false")) {
-    throw new Error("Production database connections require verified TLS and a CA certificate");
-  }
-  return {rejectUnauthorized:process.env.DB_REJECT_UNAUTHORIZED !== "false", ...(ca ? {ca} : {})};
-}
+function getDbSslConfig() {return databaseOptions().ssl;}
 
 async function runMigrations() {
   if (!process.env.DATABASE_URL) return;
-  if (process.env.NODE_ENV === "production") {
-    const url = new URL(process.env.DATABASE_URL);
-    if (process.env.DB_SSL !== "true" || process.env.DB_REJECT_UNAUTHORIZED === "false" ||
-        ["sslmode","sslrootcert","sslcert","sslkey","ssl"].some(k => url.searchParams.has(k))) {
-      throw new Error("Verified database TLS is required for production migrations");
-    }
-  }
-  const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: getDbSslConfig(),
-  });
+  const pool = new Pool(databaseOptions());
 
   const client = await pool.connect();
   try {
@@ -42,7 +26,7 @@ async function runMigrations() {
       );
     `);
 
-    const migrationsDir = path.join(__dirname, "../../migrations");
+    const migrationsDir = process.env.MIGRATIONS_DIR || path.join(__dirname, "../../migrations");
     if (fs.existsSync(migrationsDir)) {
       const files = fs
         .readdirSync(migrationsDir)
@@ -95,4 +79,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { runMigrations, getDbSslConfig };
+module.exports = { runMigrations, getDbSslConfig, databaseOptions };

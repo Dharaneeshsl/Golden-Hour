@@ -1,0 +1,10 @@
+# Copy to an ignored .tfvars file. Use a separate encrypted state per hospital AND environment.
+hospital = "hospital-slug"
+environment = "staging"
+hostname = "replace-with-hospital-domain"
+certificate_arn = "replace-with-issued-ap-south-1-ACM-certificate-ARN"
+backend_image = "replace-with-verified-image@sha256:replace-with-real-digest"
+frontend_image = "replace-with-verified-image@sha256:replace-with-real-digest"
+operator_principal_arn = "replace-with-authorized-operator-role-ARN"
+# Zero provisions infrastructure without launching unconfigured tasks. Set to two after bootstrap.
+desired_count = 0

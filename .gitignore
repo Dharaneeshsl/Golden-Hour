@@ -16,3 +16,10 @@ repomix-output.xml
 repomix-output.md
 .repomix*
 *.repomix.*
+
+.tools/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example

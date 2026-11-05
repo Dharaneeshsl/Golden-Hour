@@ -1,11 +1,11 @@
-// Browser-only wallet fixture. It signs real server challenges, with no API interception.
+// Phone-only browser flow. The SMS transport is captured in-process; the real OTP service verifies every code.
 const assert = require("node:assert/strict");
 const crypto = require("crypto");
 const http = require("http");
 const path = require("path");
 const express = require("express");
 const {chromium} = require("playwright");
-const {Wallet, getBytes} = require("ethers");
+
 const {Pool} = require("pg");
 const {totp} = require("../src/services/mfaService");
 
@@ -14,13 +14,16 @@ async function run() {
   // Build explicitly for this same-origin fixture, regardless of a developer's local .env.
   require("child_process").execFileSync(process.execPath,[
     path.resolve(__dirname,"../../frontend/node_modules/vite/bin/vite.js"),"build"
-  ],{cwd:path.resolve(__dirname,"../../frontend"),env:{...process.env,NODE_ENV:"production",VITE_API_URL:"/"},stdio:"inherit"});
+  ],{cwd:path.resolve(__dirname,"../../frontend"),env:{...process.env,NODE_ENV:"production",VITE_API_URL:"/",RAYON_NUM_THREADS:"1"},stdio:"inherit"});
   process.env.NODE_ENV = "test";
   process.env.REQUIRE_STAFF_MFA = "true";
   process.env.JWT_SECRET = crypto.randomBytes(48).toString("hex");
-  process.env.ENCRYPTION_KEY = crypto.randomBytes(32).toString("base64");
-  const admin = Wallet.createRandom(), doctor = Wallet.createRandom(), patient = Wallet.createRandom();
-  process.env.ADMIN_WALLETS = admin.address;
+  process.env.ENCRYPTION_KEY = process.env.RESTORE_TEST_KEY || crypto.randomBytes(32).toString("base64");
+  const phone = () => "+91"+String(9000000000+crypto.randomInt(0,1000000000));
+  const admin={phone:phone()},doctor={phone:phone()},patient={phone:phone()};
+  process.env.ADMIN_WALLETS="";
+  process.env.STAFF_INVITE_ONLY="true";
+  const codes=new Map();
   const pool = new Pool({connectionString:process.env.DATABASE_URL});
   const {PostgresStore} = require("../src/config/db");
   const {createApp} = require("../src/app");
@@ -30,24 +33,17 @@ async function run() {
     await new Promise(resolve => server.listen(0,"127.0.0.1",resolve));
     const origin = "http://127.0.0.1:" + server.address().port;
     process.env.FRONTEND_ORIGIN = origin;
-    const app = await createApp({store:new PostgresStore(pool),chain:{enabled:false}});
+    const store=new PostgresStore(pool);
+    const adminUser=await require("../src/services/phoneAuthService").ensurePhoneUser(store,admin.phone);
+    process.env.ADMIN_USER_IDS=adminUser.id;
+    const app = await createApp({store,chain:{enabled:false},otpProvider:{send:async ({phone,code})=>codes.set(phone,code)}});
     const dist = path.resolve(__dirname,"../../frontend/dist");
     app.use(express.static(dist));
     app.get("*",(_req,res) => res.sendFile(path.join(dist,"index.html")));
     server.on("request",app);
     browser = await chromium.launch({channel:process.env.BROWSER_CHANNEL || "chrome",headless:true});
-    async function actor(wallet, mobile = false) {
+    async function actor(account, mobile = false) {
       const context = await browser.newContext(mobile ? {viewport:{width:390,height:844},isMobile:true,hasTouch:true} : {});
-      await context.exposeBinding("fixtureWallet",async (_source,method,params) => {
-        if (["eth_accounts","eth_requestAccounts"].includes(method)) return [wallet.address];
-        if (method === "eth_chainId") return "0x1";
-        if (method === "personal_sign") return wallet.signMessage(getBytes(params[0]));
-        if (method === "wallet_requestPermissions") return [];
-        throw new Error("Unsupported wallet fixture request " + method);
-      });
-      await context.addInitScript(() => {
-        window.ethereum = {request:({method,params}) => window.fixtureWallet(method,params),on:() => {},removeListener:() => {}};
-      });
       const page = await context.newPage();
       page.setDefaultTimeout(10000);
       const errors = [];
@@ -55,19 +51,34 @@ async function run() {
       return {context,page,errors};
     }
     const p = await actor(patient,true), d = await actor(doctor), a = await actor(admin);
-    async function signIn(actor, wallet) {
-      const page = actor.page;
-      await page.goto(origin + "/login");
-      await page.getByRole("button",{name:"Sign Message with MetaMask",exact:true}).click();
-      await page.waitForFunction(() => document.querySelector("#mfa-code") || localStorage.getItem("goldenhour_token"));
-      if (await page.locator("#mfa-code").count()) {
-        const secret = await page.locator("code").textContent();
-        await page.locator("#mfa-code").fill(totp(secret,wallet.address).generate());
+    async function signIn(actor,account) {
+      const page=actor.page;
+      await page.goto(origin+"/login");
+      await page.getByLabel("Mobile number").fill(account.phone);
+      await page.getByRole("button",{name:"Request sign-in code",exact:true}).click();
+      await page.getByLabel("SMS verification code").waitFor();
+      await page.getByLabel("SMS verification code").fill(codes.get(account.phone));
+      await page.getByRole("button",{name:"Verify code",exact:true}).click();
+      await page.waitForFunction(()=>document.querySelector("code") || localStorage.getItem("goldenhour_authenticated"));
+      if (await page.locator("code").count()) {
+        const secret=await page.locator("code").textContent();
+        await page.getByLabel("Authenticator or recovery code").fill(totp(secret,"staff").generate());
         await page.getByRole("button",{name:"Verify code",exact:true}).click();
         await page.getByRole("button",{name:"I saved my codes. Continue",exact:true}).click();
       }
-      await page.waitForFunction(() => !!localStorage.getItem("goldenhour_token"));
+      await page.waitForFunction(()=>localStorage.getItem("goldenhour_authenticated")==="true");
+      assert.equal(await page.evaluate(()=>localStorage.getItem("goldenhour_token")),null);
+      assert.equal((await actor.context.cookies()).find(cookie=>cookie.name==="gh_access").httpOnly,true);
     }
+    await signIn(a,admin);
+    const importPhone=phone();
+    await a.page.getByLabel("Staff CSV").setInputFiles({name:"synthetic-staff.csv",mimeType:"text/csv",buffer:Buffer.from("phone\n"+importPhone+"\n"+importPhone+"\ninvalid")});
+    await a.page.getByText("Duplicate row",{exact:true}).waitFor();
+    await a.page.getByRole("button",{name:"Create invitations for valid rows",exact:true}).click();
+    await a.page.getByText(/Created .*expires/).waitFor();
+    await a.page.getByLabel("Invite a clinician mobile number").fill(doctor.phone);
+    await a.page.getByRole("button",{name:"Create invitation",exact:true}).click();
+    const invitation=await a.page.locator("form code").textContent();
     await signIn(p,patient);
     await p.page.getByLabel("Full Name",{exact:true}).fill("Synthetic browser patient");
     await p.page.getByLabel("Blood Group",{exact:true}).fill("O+");
@@ -78,6 +89,7 @@ async function run() {
     await signIn(d,doctor);
     await d.page.getByRole("button",{name:"Register as Healthcare Provider"}).click();
     await d.page.getByLabel("Full Name",{exact:true}).fill("Synthetic browser doctor");
+    await d.page.getByLabel("Hospital invitation code").fill(invitation);
     await d.page.getByLabel("Medical License Number").fill("SYNTHETIC-BROWSER");
     await d.page.getByLabel("Medical Specialty").fill("Emergency");
     await d.page.getByRole("button",{name:"Submit Provider Registration for Approval"}).click();
@@ -85,10 +97,10 @@ async function run() {
     await d.page.waitForURL("**/login");
     await signIn(d,doctor);
 
-    await signIn(a,admin);
+    await a.page.reload();
     await a.page.getByRole("button",{name:"Approve Provider",exact:true}).click();
     await a.page.getByText("No providers in pending state.").waitFor();
-    await p.page.getByPlaceholder("Verified Provider Wallet (0x...)").fill(doctor.address);
+    await p.page.getByPlaceholder("Clinician mobile number (+91…)").fill(doctor.phone);
     await p.page.getByRole("button",{name:"Grant Consent",exact:true}).click();
     await p.page.getByText("ACTIVE",{exact:true}).waitFor();
     await d.page.reload();
@@ -119,8 +131,15 @@ async function run() {
     await a.page.getByRole("button",{name:"Pending reviews",exact:true}).click();
     await a.page.getByRole("button",{name:"Approve access",exact:true}).first().click();
 
+    await a.page.getByRole("button",{name:"Emergency Access Audits",exact:true}).click();
+    const csvDownload=a.page.waitForEvent("download");
+    await a.page.getByRole("button",{name:"Download audit CSV",exact:true}).click();
+    assert.match((await csvDownload).suggestedFilename(),/\.csv$/);
+    const pdfDownload=a.page.waitForEvent("download");
+    await a.page.getByRole("button",{name:"Download audit PDF and verification report",exact:true}).click();
+    assert.match((await pdfDownload).suggestedFilename(),/\.pdf$/);
     for (const actor of [p,d,a]) assert.deepEqual(actor.errors,[]);
-    console.info("Browser workflow passed: mobile patient enrollment, staff MFA, verification, consent, record retrieval, revocation, QR access and review.");
+    console.info("Browser workflow passed: mobile patient enrollment, phone OTP, cookie sessions, staff MFA, verification, consent, record retrieval, revocation, QR access and review.");
   } finally {
     await browser?.close();
     await new Promise(resolve => server.close(resolve));

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import SummaryFreshness from "./SummaryFreshness";
 import QRCodeCard from "./QRCodeCard";
 import RecordTimeline from "./RecordTimeline";
 import ConsentManager from "./ConsentManager";
@@ -8,6 +9,8 @@ export default function PatientDashboard({ patientId = "", wallet = "" }) {
   const [patient, setPatient] = useState(null);
   const [records, setRecords] = useState([]);
   const [audit, setAudit] = useState([]);
+  const [recordCursor, setRecordCursor] = useState(null);
+  const [auditCursor, setAuditCursor] = useState(null);
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
@@ -18,16 +21,28 @@ export default function PatientDashboard({ patientId = "", wallet = "" }) {
     medications: "",
   });
   const [busy, setBusy] = useState(false);
+  const [myRequests, setMyRequests] = useState([]);
   const [requestType, setRequestType] = useState("access");
   const [requestDetails, setRequestDetails] = useState("");
   const [requestReceipt, setRequestReceipt] = useState(null);
   const [downloadingFhir, setDownloadingFhir] = useState(false);
+
+  useEffect(() => {api.myDataRequests().then(setMyRequests).catch(() => {});}, [patientId]);
 
   const downloadArchive = async () => {
     setBusy(true);
     setError("");
     try {
       const archive = await api.patientArchive();
+      let cursor = archive.nextCursor;
+      while (cursor) {
+        const page = await api.patientArchive(cursor);
+        if (page.patient.revision !== archive.patient.revision) throw new Error("The patient summary changed. Download the archive again.");
+        archive.records.push(...page.records);
+        archive.audit.push(...page.audit);
+        cursor = page.nextCursor;
+      }
+      delete archive.nextCursor;
       const url = URL.createObjectURL(new Blob([JSON.stringify(archive,null,2)],{type:"application/json"}));
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -61,11 +76,12 @@ export default function PatientDashboard({ patientId = "", wallet = "" }) {
     let active = true;
     api
       .patient(patientId)
-      .then((data) => {
+      .then(async (data) => {
+        const [recordPage,auditPage] = await Promise.all([api.recordsPage(patientId),api.auditPage(patientId)]);
         if (active) {
           setPatient(data);
-          setRecords(data.records || []);
-          setAudit(data.audit || []);
+          setRecords(recordPage.items);setRecordCursor(recordPage.nextCursor);
+          setAudit(auditPage.items);setAuditCursor(auditPage.nextCursor);
           setEditForm({
             bloodGroup: data.critical?.bloodGroup || "",
             allergies: (data.critical?.allergies || []).join(", "),
@@ -140,7 +156,7 @@ export default function PatientDashboard({ patientId = "", wallet = "" }) {
   const critical = patient.critical || {};
 
   return (
-    <section className="dashboard">
+    <section className="dashboard"><SummaryFreshness updatedAt={patient.summaryUpdatedAt || patient.createdAt} patient />
       <div className="section-heading">
         <div>
           <p className="eyebrow">Patient Dashboard</p>
@@ -232,6 +248,12 @@ export default function PatientDashboard({ patientId = "", wallet = "" }) {
           <h3>Medical Records Timeline</h3>
           <button onClick={downloadArchive} disabled={busy}>Download my complete record archive</button>
           <RecordTimeline records={records} onView={viewRecord} />
+          {recordCursor && <button disabled={busy} onClick={async () => {
+            setBusy(true);
+            try {const page=await api.recordsPage(patientId,recordCursor);setRecords(rows=>[...rows,...page.items]);setRecordCursor(page.nextCursor);}
+            catch (err) {setError(err.message);}
+            finally {setBusy(false);}
+          }}>Load older records</button>}
           {detail && (
             <div className="record-detail" style={{ marginTop: "1rem", padding: "1rem", background: "rgba(255,255,255,0.05)", borderRadius: "8px" }}>
               <h4>{detail.recordType}</h4>
@@ -243,6 +265,12 @@ export default function PatientDashboard({ patientId = "", wallet = "" }) {
 
         <article className="panel wide">
           <h3>Patient Audit History</h3>
+          {auditCursor && <button disabled={busy} onClick={async () => {
+            setBusy(true);
+            try {const page=await api.auditPage(patientId,auditCursor);setAudit(rows=>[...rows,...page.items]);setAuditCursor(page.nextCursor);}
+            catch (err) {setError(err.message);}
+            finally {setBusy(false);}
+          }}>Load older access history</button>}
           {audit.length === 0 ? (
             <p className="muted">No audit events logged yet.</p>
           ) : (
@@ -263,9 +291,10 @@ export default function PatientDashboard({ patientId = "", wallet = "" }) {
 
         <article className="panel wide">
           <h3>Patient data requests</h3>
+          {myRequests.map(item => <p key={item.id}>{item.request_type} · {item.status} · Reference {item.id}</p>)}
           <form onSubmit={async event => {
             event.preventDefault();setBusy(true);setError("");
-            try {const result=await api.submitDataRequest({requestType,details:requestDetails});setRequestReceipt(result.dsr.id);setRequestDetails("");}
+            try {const result=await api.submitDataRequest({requestType,details:requestDetails});setRequestReceipt(result.dsr.id);setRequestDetails("");setMyRequests(await api.myDataRequests());}
             catch (err) {setError(err.message);}
             finally {setBusy(false);}
           }}>

@@ -7,9 +7,9 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const crypto = require("crypto");
 const { createStore } = require("./config/db");
-const { ChainService } = require("./services/chainService");
+
 const defaultEncryption = require("./services/encryptionService");
-const defaultIpfs = require("./services/ipfsService");
+const {privateObjectStore} = require("./services/privateObjectStore");
 const { EnvelopeEncryptionService } = require("./services/envelopeEncryptionService");
 const { AuditChainService } = require("./services/auditChainService");
 
@@ -34,11 +34,12 @@ const { validateStartupConfig } = require("./config/validateConfig");
 
 async function createApp({
   store,
-  chain = new ChainService(),
+  chain = {enabled:false},
   encryption = defaultEncryption,
   ipfs,
+  otpProvider,
 } = {}) {
-  validateStartupConfig();
+  validateStartupConfig({otpProviderInjected:Boolean(otpProvider)});
   let erasureLedger;
   const ownsStore = !store;
   store = store || (await createStore());
@@ -46,18 +47,7 @@ async function createApp({
   if (process.env.NODE_ENV === "production" && chain.enabled) {
     throw new Error("Public chain writes are disabled for hospital deployments");
   }
-  ipfs ??= process.env.NODE_ENV === "production" ? {
-    async uploadEncrypted(payload) {
-      const cid = crypto.randomUUID();
-      await store.query("INSERT INTO encrypted_objects(id,payload) VALUES ($1,$2)", [cid,payload]);
-      return {cid, persisted: true};
-    },
-    async fetchEncrypted(cid) {
-      const result = await store.query("SELECT payload FROM encrypted_objects WHERE id=$1", [cid]);
-      if (!result.rowCount) throw new Error("Private record object unavailable");
-      return result.rows[0].payload;
-    }
-  } : defaultIpfs;
+  ipfs ??= privateObjectStore(store);
   const app = express();
   app.use("/api", (_req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
@@ -69,7 +59,7 @@ async function createApp({
   if (process.env.VERCEL) {
     app.set("trust proxy", 1);
   } else if (process.env.TRUST_PROXY) {
-    app.set("trust proxy", process.env.TRUST_PROXY === "true" ? 1 : process.env.TRUST_PROXY);
+    app.set("trust proxy", process.env.TRUST_PROXY === "true" ? 1 : /^[1-3]$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY);
   }
 
   app.use((req, res, next) => {
@@ -78,7 +68,7 @@ async function createApp({
       const start = performance.now();
       res.once("finish", () => console.info(JSON.stringify({
         event:"http", requestId:req.requestId, method:req.method,
-        route:req.route?.path || "unmatched", status:res.statusCode,
+        route:req.route?.path || "unmatched",service:req.originalUrl.startsWith("/api/emergency-access") ? "emergency" : "application", status:res.statusCode,
         durationMs:Math.round(performance.now() - start)
       })));
     }
@@ -99,9 +89,10 @@ async function createApp({
         if (allowedOrigins.includes(origin)) {
           return callback(null, true);
         }
-        callback(new Error("CORS policy restriction: Origin not allowed"));
+        callback(Object.assign(new Error("CORS policy restriction: Origin not allowed"),{status:403}));
       },
       credentials: true,
+      exposedHeaders:["X-Next-Cursor","Idempotency-Replayed"],
     }),
     express.json({ limit: "256kb" })
   );
@@ -109,12 +100,12 @@ async function createApp({
   if (process.env.CLINICAL_ERASURE_ENABLED === "true") {
     if (!process.env.ERASURE_LEDGER_DATABASE_URL) throw new Error("Independent erasure ledger required");
     const {Pool} = require("pg");
-    const {getDbSslConfig} = require("./config/migrate");
+    const {databaseOptions} = require("./config/databaseOptions");
     const {assertErasureLedgerApplied} = require("./services/erasureService");
     const primary = new URL(process.env.DATABASE_URL), external = new URL(process.env.ERASURE_LEDGER_DATABASE_URL);
     if (primary.host===external.host && primary.pathname===external.pathname) throw new Error("Independent ledger database required");
-    if (["sslmode","sslrootcert","sslcert","sslkey","ssl"].some(key => external.searchParams.has(key))) throw new Error("Configure ledger TLS with DB_CA_PEM, not URL overrides");
-    const ledger = erasureLedger = new Pool({connectionString:external.href,ssl:getDbSslConfig(),max:2,connectionTimeoutMillis:5000});
+
+    const ledger = erasureLedger = new Pool({...databaseOptions(external.href),max:2,connectionTimeoutMillis:5000});
     app.set("erasureLedger",ledger);
     await assertErasureLedgerApplied(store,ledger);
     app.use("/api",asyncHandler(async (_req,res,next) => {
@@ -167,7 +158,7 @@ async function createApp({
       if (erasureLedger) await require("./services/erasureService").assertErasureLedgerApplied(store,erasureLedger);
       if (store.query) {
         // Bug #31 Fix: Verify migration table exists in database
-        const result = await store.query("SELECT 1 FROM schema_migrations WHERE filename=$1", ["014_summary_provenance.sql"]);
+        const result = await store.query("SELECT 1 FROM schema_migrations WHERE filename=$1", ["018_archive_exports.sql"]);
         if (!result.rowCount) throw new Error("Pending schema upgrade");
       }
       s.json({
@@ -202,7 +193,12 @@ async function createApp({
   }));
   app.get("/api/operations", requireAuth, asyncHandler(async (req,res) => {
     if (req.user.role !== "admin") return res.sendStatus(403);
-    res.json(await controls());
+    const state = await controls();
+    if (store.query) {
+      const metrics = (await store.query("SELECT (SELECT count(*) FROM outbox WHERE status='pending') AS pending_jobs,(SELECT count(*) FROM outbox WHERE status='failed') AS failed_jobs,(SELECT count(*) FROM audit_logs WHERE action='EMERGENCY_BREAK_GLASS' AND created_at>now()-interval '1 hour') AS emergency_access_last_hour")).rows[0];
+      return res.json({...state,metrics,waitingDatabaseConnections:store.pool?.waitingCount || 0});
+    }
+    res.json(state);
   }));
   app.put("/api/operations", requireAuth, asyncHandler(async (req,res) => {
     if (req.user.role !== "admin") return res.sendStatus(403);
@@ -231,7 +227,9 @@ async function createApp({
     next();
   }));
 
-  app.use("/api/auth", authLimiter, authRoutes({ store }));
+  app.use("/api", require("./middleware/validateClinicalInput").validateClinicalInput);
+  app.use("/api", require("./middleware/clinicalWriteGuard").clinicalWriteGuard(store));
+  app.use("/api/auth", authLimiter, authRoutes({ store, otpProvider }));
   app.use("/api/patients", patientRoutes(createPatientController(c)));
   app.use("/api/doctors", doctorRoutes(createDoctorController(c)));
   app.use("/api/records", recordRoutes(createRecordController(c), store));
@@ -245,7 +243,7 @@ async function createApp({
   app.use((err, req, res, _next) => {
     const status = err.status || err.statusCode || (err.name === "UnauthorizedError" ? 401 : 500);
     const isClientError = status >= 400 && status < 500;
-    console.error(`[Error ${req.requestId}] [${status}]`, err.message || err);
+    console.error(JSON.stringify({event:"request_error",requestId:req.requestId,status,name:err.name || "Error"}));
     res.status(status).json({
       error: isClientError ? err.message : "Internal server error",
       requestId: req.requestId,

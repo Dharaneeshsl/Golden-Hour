@@ -1,3 +1,5 @@
+const {pagination,pageResponse,memoryPage} = require("../utils/pagination");
+const {ensurePhoneUser,validPhone,subjectId} = require("../services/phoneAuthService");
 const {ethers} = require("ethers");
 const {AuditChainService} = require("../services/auditChainService");
 const crypto = require("crypto");
@@ -8,8 +10,13 @@ function createDoctorController({ store, chain, auditChain }) {
   return {
     invite: asyncHandler(async (req,res) => {
       if (req.user.role !== "admin") return res.sendStatus(403);
-      if (!ethers.isAddress(req.body?.wallet)) return res.status(400).json({error:"Valid clinician wallet required"});
-      const wallet = ethers.getAddress(req.body.wallet);
+      let wallet;
+      if (req.body?.phone!==undefined) {
+        if (!validPhone(req.body.phone)) return res.status(400).json({error:"Enter an Indian mobile number with +91"});
+        wallet="user:"+(await ensurePhoneUser(store,req.body.phone)).id;
+      } else if (ethers.isAddress(req.body?.wallet)) wallet=ethers.getAddress(req.body.wallet);
+      else if (subjectId(req.body?.wallet)) wallet=req.body.wallet;
+      else return res.status(400).json({error:"A staff mobile number is required"});
       const token = crypto.randomBytes(32).toString("hex");
       const id = crypto.randomUUID();
       const expiresAt = new Date(Date.now()+24*60*60*1000).toISOString();
@@ -131,7 +138,7 @@ function createDoctorController({ store, chain, auditChain }) {
         }
         res.json(provider);
       } catch (e) {
-        console.error("Provider chain verification error:", e);
+        console.error("Provider chain verification error:", {name:e.name, code:e.code || "INTERNAL_ERROR"});
         await store.updateProvider(provider.wallet, {
           status: "pending",
           verifiedBy: null,
@@ -181,14 +188,17 @@ function createDoctorController({ store, chain, auditChain }) {
         timestamp: new Date().toISOString(),
       });
 
+      await auditChain.appendAuditEvent({actor:req.user.wallet,action:"PROVIDER_STATUS_CHANGED",details:{providerId:updated.id,status}});
       res.json(updated);
     }),
 
     list: asyncHandler(async (req, res) => {
-      const limit = parseInt(req.query.limit, 10) || 50;
-      const offset = parseInt(req.query.offset, 10) || 0;
-      const providers = await store.providers(req.query.status);
-      res.json(providers.slice(offset, offset + limit));
+      const page = pagination(req.query);
+      if (req.query.status!==undefined && !["pending","verified","suspended"].includes(req.query.status)) return res.status(400).json({error:"Invalid provider status"});
+      const rows = store.listProvidersPage ? await store.listProvidersPage(req.query.status,page)
+        : memoryPage(await store.providers(req.query.status),page);
+      return pageResponse(res,rows,page);
+
     }),
   };
 }

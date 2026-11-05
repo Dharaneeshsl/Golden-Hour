@@ -1,3 +1,4 @@
+import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, beforeEach } from "vitest";
 import React from "react";
 import { renderToString } from "react-dom/server";
@@ -15,7 +16,7 @@ describe("Emergency Frontend Components Rendering", () => {
 
   it("renders EmergencyScanView with clinical reason codes and facility inputs without crash", () => {
     const html = renderToString(
-      React.createElement(EmergencyScanView, { initialPatientId: "p-test-uuid-999" })
+      React.createElement(MemoryRouter, null, React.createElement(EmergencyScanView, { initialPatientId: "p-test-uuid-999" }))
     );
     expect(html).toBeTruthy();
     expect(html).toContain("Break-Glass Emergency Access");

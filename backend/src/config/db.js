@@ -1,7 +1,11 @@
 const { Pool } = require("pg");
+const {databaseOptions} = require("./databaseOptions");
 const fs = require("fs");
 const path = require("path");
 const { ethers } = require("ethers");
+const {subjectId} = require("../utils/identity");
+const { AsyncLocalStorage } = require("node:async_hooks");
+const transactions = new AsyncLocalStorage();
 
 function isValidUuid(id) {
   return typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
@@ -20,6 +24,7 @@ function normalizePatient(row) {
   if (!row) return null;
   return {
     id: row.id,
+    userId: row.user_id || row.userId || null,
     wallet: canonicalizeWallet(row.wallet),
     profile: typeof row.profile === "string" ? JSON.parse(row.profile) : (row.profile || {}),
     revision: row.revision || 1,
@@ -34,6 +39,7 @@ function normalizeProvider(row) {
   if (!row) return null;
   return {
     id: row.id,
+    userId: row.user_id || row.userId || null,
     wallet: canonicalizeWallet(row.wallet),
     name: row.name,
     licenseNumber: row.license_number || row.licenseNumber,
@@ -97,20 +103,11 @@ function normalizeConsent(row) {
   };
 }
 
-function getDbSslConfig() {
-  if (process.env.DB_SSL !== "true") return undefined;
-  const ca = process.env.DB_CA_PEM || (process.env.DB_CA ? fs.readFileSync(process.env.DB_CA,"utf8") : undefined);
-  if (process.env.NODE_ENV === "production" && (!ca || process.env.DB_REJECT_UNAUTHORIZED === "false")) {
-    throw new Error("Production database connections require verified TLS and a CA certificate");
-  }
-  return {rejectUnauthorized:process.env.DB_REJECT_UNAUTHORIZED !== "false", ...(ca ? {ca} : {})};
-}
 
 function createPool() {
   if (!process.env.DATABASE_URL) return null;
   return new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: getDbSslConfig(),
+    ...databaseOptions(),
     max: Number(process.env.DB_POOL_SIZE || (process.env.VERCEL ? 2 : 10)),
     idleTimeoutMillis: 10000,
     connectionTimeoutMillis: 5000,
@@ -118,16 +115,23 @@ function createPool() {
 }
 
 class PostgresStore {
+  get inTransaction() {
+    const context = transactions.getStore();
+    return this._inTransaction || context?.pool === this.pool || context?.client === this.pool;
+  }
+
   async transaction(work) {
+    if (this.inTransaction) return work(this);
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      const result = await work(new PostgresStore(client, true));
+      const result = await transactions.run({pool:this.pool,client},
+        () => work(new PostgresStore(client,true)));
       await client.query("COMMIT");
       return result;
-    } catch (err) {
+    } catch (error) {
       await client.query("ROLLBACK");
-      throw err;
+      throw error;
     } finally {
       client.release();
     }
@@ -171,12 +175,14 @@ class PostgresStore {
   }
 
   constructor(pool, inTransaction = false) {
-    this.inTransaction = inTransaction;
+    this._inTransaction = inTransaction;
     this.pool = pool;
   }
 
   async query(q, p = []) {
-    return this.pool.query(q, p);
+    const context = transactions.getStore();
+    const client = context && (context.pool===this.pool || context.client===this.pool) ? context.client : this.pool;
+    return client.query(q,p);
   }
 
   async patientById(id) {
@@ -188,8 +194,53 @@ class PostgresStore {
   async patientByWallet(wallet) {
     if (!wallet) return null;
     const w = wallet.toLowerCase();
-    const r = await this.query("SELECT * FROM patients WHERE lower(wallet)=$1", [w]);
+    const r = await this.query("SELECT * FROM patients WHERE lower(wallet)=$1 OR user_id=$2", [w,subjectId(wallet)]);
     return r && r.rows && r.rows.length > 0 ? normalizePatient(r.rows[0]) : null;
+  }
+
+  async queryPage(sql, params, page, timeColumn, idColumn, normalize) {
+    if (page.cursor && !isValidUuid(page.cursor.id)) {
+      const error = new Error("Invalid pagination identifier");error.status=400;throw error;
+    }
+    const values = [...params];
+    if (page.cursor) {
+      values.push(page.cursor.time,page.cursor.id);
+      sql += ` AND (${timeColumn},${idColumn}) < ($${values.length-1}::timestamptz,$${values.length}::uuid)`;
+    }
+    values.push(page.limit+1,page.offset);
+    const result = await this.query(sql+` ORDER BY ${timeColumn} DESC,${idColumn} DESC LIMIT $${values.length-1} OFFSET $${values.length}`,values);
+    return result.rows.map(normalize);
+  }
+
+  listReviewsPage(page) {
+    return this.queryPage("SELECT bge.* FROM break_glass_events bge LEFT JOIN break_glass_reviews bgr ON bgr.event_id=bge.id WHERE bgr.event_id IS NULL",[],page,"bge.created_at","bge.id",row=>row);
+  }
+
+  listPatientsPage(page) {
+    return this.queryPage("SELECT id,wallet,created_at,(critical<>'{}'::jsonb) AS has_critical FROM patients WHERE true",[],page,"created_at","id",
+      row=>({...normalizePatient(row),hasCriticalData:row.has_critical}));
+  }
+
+  listProvidersPage(status,page) {
+    return this.queryPage("SELECT * FROM providers WHERE "+(status ? "status=$1" : "true"),status ? [status] : [],page,"created_at","id",normalizeProvider);
+  }
+
+  listRecordsPage(patientId,page) {
+    return this.queryPage("SELECT * FROM records WHERE patient_id=$1",[patientId],page,"created_at","id",normalizeRecord);
+  }
+
+  listAuditPage(patientId,page) {
+    return this.queryPage("SELECT * FROM audit_logs WHERE "+(patientId ? "patient_id=$1" : "true"),patientId ? [patientId] : [],page,"created_at","id",normalizeAudit);
+  }
+
+  listPatientConsentsPage(patientId,page) {
+    return this.queryPage("SELECT c.*,p.wallet AS provider_wallet,p.name AS provider_name,p.specialty AS provider_specialty FROM patient_provider_consents c JOIN providers p ON p.id=c.provider_id WHERE c.patient_id=$1",
+      [patientId],page,"c.granted_at","c.id",normalizeConsent);
+  }
+
+  listProviderConsentsPage(providerId,page) {
+    return this.queryPage("SELECT c.*,pt.wallet AS patient_wallet,pt.profile AS patient_profile FROM patient_provider_consents c JOIN patients pt ON pt.id=c.patient_id WHERE c.provider_id=$1 AND c.status='active' AND (c.expires_at IS NULL OR c.expires_at>now())",
+      [providerId],page,"c.granted_at","c.id",normalizeConsent);
   }
 
   async allPatients() {
@@ -202,8 +253,8 @@ class PostgresStore {
     const provenance = Object.fromEntries(Object.keys(x.critical || {}).map(field =>
       [field,{source:"Patient reported",author:w,updatedAt:x.createdAt}]));
     const r = await this.query(
-      "INSERT INTO patients(id,wallet,profile,critical,created_at,critical_provenance) VALUES($1,$2,$3,$4,$5,$6) RETURNING *",
-      [x.id, w, JSON.stringify(x.profile || {}), JSON.stringify(x.critical || {}), x.createdAt, JSON.stringify(provenance)]
+      "INSERT INTO patients(id,wallet,profile,critical,created_at,critical_provenance,user_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *",
+      [x.id, w, JSON.stringify(x.profile || {}), JSON.stringify(x.critical || {}), x.createdAt, JSON.stringify(provenance),x.userId || (/^user:[a-f0-9-]{36}$/i.test(w) ? w.slice(5) : null)]
     );
     return normalizePatient(r.rows[0]);
   }
@@ -225,6 +276,28 @@ class PostgresStore {
     return normalizePatient(r.rows[0]);
   }
 
+  async beginArchive(patientId,principal) {
+    return this.transaction(async tx=>{
+      await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+      const patient=await tx.patientById(patientId);
+      if (!patient) throw new Error("Patient unavailable");
+      const records=(await tx.query("SELECT id FROM records WHERE patient_id=$1 ORDER BY created_at,id LIMIT 20001",[patientId])).rows;
+      const audits=(await tx.query("SELECT id FROM audit_logs WHERE patient_id=$1 ORDER BY created_at,id LIMIT 100001",[patientId])).rows;
+      if (records.length>20000 || audits.length>100000) {
+        const error=new Error("Use the hospital's assisted export process for this archive");error.status=413;throw error;
+      }
+      const id=require("crypto").randomUUID();
+      return (await tx.query("INSERT INTO patient_archive_exports(id,patient_id,principal,revision,record_ids,audit_ids) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *",
+        [id,patientId,principal,patient.revision,JSON.stringify(records.map(row=>row.id)),JSON.stringify(audits.map(row=>row.id))])).rows[0];
+    });
+  }
+
+  async archivePage(id, snapshot, recordOffset, auditOffset, limit) {
+    const records = await this.query("SELECT * FROM records WHERE patient_id=$1 AND created_at<=$2 ORDER BY created_at,id LIMIT $3 OFFSET $4",[id,snapshot,limit+1,recordOffset]);
+    const audit = await this.query("SELECT * FROM audit_logs WHERE patient_id=$1 AND created_at<=$2 ORDER BY created_at,id LIMIT $3 OFFSET $4",[id,snapshot,limit+1,auditOffset]);
+    return {records:records.rows.map(normalizeRecord),audit:audit.rows.map(normalizeAudit)};
+  }
+
   async recordsForPatient(id) {
     if (!isValidUuid(id)) return [];
     const r = await this.query("SELECT * FROM records WHERE patient_id=$1 ORDER BY created_at DESC", [id]);
@@ -239,15 +312,15 @@ class PostgresStore {
 
   async addRecord(x) {
     const r = await this.query(
-      "INSERT INTO records(id,patient_id,record_type,doctor_id,ipfs_cid,encrypted_hash,created_at) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *",
-      [x.id, x.patientId, x.recordType, x.doctorId, x.ipfsCid, x.encryptedHash, x.createdAt]
+      "INSERT INTO records(id,patient_id,record_type,doctor_id,ipfs_cid,encrypted_hash,created_at,doctor_user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *",
+      [x.id, x.patientId, x.recordType, x.doctorId, x.ipfsCid, x.encryptedHash, x.createdAt,x.doctorUserId || subjectId(x.doctorId)]
     );
     return normalizeRecord(r.rows[0]);
   }
 
   async addAudit(x) {
     const r = await this.query(
-      "INSERT INTO audit_logs(id,patient_id,actor,action,record_id,provider_id,metadata,expires_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *",
+      "INSERT INTO audit_logs(id,patient_id,actor,action,record_id,provider_id,metadata,expires_at,created_at,actor_user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,coalesce($10::uuid,(SELECT user_id FROM identities WHERE provider_type='wallet' AND identifier=$3 LIMIT 1))) RETURNING *",
       [
         x.id,
         isValidUuid(x.patientId) ? x.patientId : null,
@@ -258,6 +331,7 @@ class PostgresStore {
         JSON.stringify(x.metadata || {}),
         x.expiresAt || null,
         x.timestamp || new Date().toISOString(),
+        subjectId(x.actor),
       ]
     );
     return normalizeAudit(r.rows[0]);
@@ -283,7 +357,7 @@ class PostgresStore {
   async providerByWallet(wallet) {
     if (!wallet) return null;
     const w = wallet.toLowerCase();
-    const r = await this.query("SELECT * FROM providers WHERE lower(wallet)=$1", [w]);
+    const r = await this.query("SELECT * FROM providers WHERE lower(wallet)=$1 OR user_id=$2", [w,subjectId(wallet)]);
     return r && r.rows && r.rows.length > 0 ? normalizeProvider(r.rows[0]) : null;
   }
 
@@ -306,8 +380,8 @@ class PostgresStore {
   async addProvider(x) {
     const w = canonicalizeWallet(x.wallet);
     const r = await this.query(
-      "INSERT INTO providers(id,wallet,name,license_number,specialty,status,created_at) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *",
-      [x.id, w, x.name, x.licenseNumber, x.specialty, x.status, x.createdAt]
+      "INSERT INTO providers(id,wallet,name,license_number,specialty,status,created_at,user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *",
+      [x.id, w, x.name, x.licenseNumber, x.specialty, x.status, x.createdAt,x.userId || (/^user:[a-f0-9-]{36}$/i.test(w) ? w.slice(5) : null)]
     );
     return normalizeProvider(r.rows[0]);
   }
@@ -349,7 +423,7 @@ class PostgresStore {
 
   async consentsForProvider(providerId) {
     const r = await this.query(
-      "SELECT c.*, pt.wallet as patient_wallet, pt.profile as patient_profile FROM patient_provider_consents c JOIN patients pt ON pt.id=c.patient_id WHERE c.provider_id=$1 AND c.status='active' ORDER BY c.granted_at DESC",
+      "SELECT c.*, pt.wallet as patient_wallet, pt.profile as patient_profile FROM patient_provider_consents c JOIN patients pt ON pt.id=c.patient_id WHERE c.provider_id=$1 AND c.status='active' AND (c.expires_at IS NULL OR c.expires_at>now()) ORDER BY c.granted_at DESC",
       [providerId]
     );
     return r.rows.map(normalizeConsent);
@@ -365,8 +439,8 @@ class PostgresStore {
   // --- Sessions (B11) ---
   async createSession(x) {
     const r = await this.query(
-      "INSERT INTO sessions(id, wallet, token_hash, ip_address, user_agent, expires_at, created_at, mfa_verified) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *",
-      [x.id, x.wallet, x.tokenHash, x.ipAddress || null, x.userAgent || null, x.expiresAt, x.createdAt || new Date().toISOString(), Boolean(x.mfaVerified)]
+      "INSERT INTO sessions(id, wallet, token_hash, ip_address, user_agent, expires_at, created_at, mfa_verified,user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *",
+      [x.id, x.wallet, x.tokenHash, x.ipAddress || null, x.userAgent || null, x.expiresAt, x.createdAt || new Date().toISOString(), Boolean(x.mfaVerified),x.userId || null]
     );
     return r.rows[0];
   }
@@ -391,6 +465,11 @@ class PostgresStore {
   }
 
   // --- Key Registry for KMS Envelope Encryption (B2, B3) ---
+  async getKeyRecordById(patientId,keyId) {
+    const row=(await this.query("SELECT * FROM key_registry WHERE patient_id=$1 AND key_id=$2",[patientId,keyId])).rows[0];
+    return row ? {keyId:row.key_id,patientId:row.patient_id,encryptedDEK:row.encrypted_dek,status:row.status} : null;
+  }
+
   async getKeyRecord(patientId) {
     if (!isValidUuid(patientId)) return null;
     const r = await this.query(
@@ -470,7 +549,7 @@ class PostgresStore {
   // --- Hash-Chained Append-Only Audit Log (Step 4 Audit) ---
   async addAuditEvent(x) {
     const r = await this.query(
-      "INSERT INTO audit_events(id, patient_id, actor, action, details, previous_hash, current_hash, created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *",
+      "INSERT INTO audit_events(id, patient_id, actor, action, details, previous_hash, current_hash, created_at, actor_user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,coalesce($9::uuid,(SELECT user_id FROM identities WHERE provider_type='wallet' AND identifier=$3 LIMIT 1))) RETURNING *",
       [
         x.id,
         isValidUuid(x.patientId) ? x.patientId : null,
@@ -480,6 +559,7 @@ class PostgresStore {
         x.previousHash,
         x.currentHash,
         x.createdAt || new Date().toISOString(),
+        subjectId(x.actor),
       ]
     );
     return r.rows[0];
@@ -551,461 +631,17 @@ class PostgresStore {
 
 }
 
-class JsonStore {
-  replaceCard(id, hash) {
-    this.state.cards ??= {};
-    this.state.cards[id] = hash;
-    this.save();
-  }
-
-  cardPatient(hash) {
-    return Object.keys(this.state.cards || {}).find(id => this.state.cards[id] === hash);
-  }
-
-  rotateRefresh(id, oldHash, newHash) {
-    const session = this.state.sessions?.find(s => s.id === id && s.tokenHash === oldHash);
-    if (!session || session.revokedAt || Date.parse(session.expiresAt) <= Date.now()) return false;
-    session.tokenHash = newHash;
-    this.save();
-    return true;
-  }
-
-  challenges = new Map();
-
-  saveChallenge(wallet, message, expiresAt) {
-    for (const [key, entry] of this.challenges) {
-      if (Date.parse(entry.expiresAt) <= Date.now()) this.challenges.delete(key);
-    }
-    this.challenges.set(wallet, {message, expiresAt});
-  }
-
-  getChallenge(wallet) {
-    const entry = this.challenges.get(wallet);
-    return entry && Date.parse(entry.expiresAt) > Date.now() ? entry : null;
-  }
-
-  consumeChallenge(wallet, message) {
-    return this.getChallenge(wallet)?.message === message && this.challenges.delete(wallet);
-  }
-
-  constructor(
-    file = process.env.DATA_FILE ||
-      (fs.existsSync(path.join(process.cwd(), ".data", "goldenhour.json"))
-        ? path.join(process.cwd(), ".data", "goldenhour.json")
-        : path.join(__dirname, "../../.data", "goldenhour.json"))
-  ) {
-    this.file = file;
-    this.state = {
-      patients: [],
-      records: [],
-      audit: [],
-      providers: [],
-      consents: [],
-    };
-    if (file !== ":memory:" && fs.existsSync(file)) {
-      try {
-        this.state = { ...this.state, ...JSON.parse(fs.readFileSync(file, "utf8")) };
-      } catch (e) {
-        console.error("Warning: Failed to parse JsonStore file, initializing empty state", e);
-      }
-    }
-  }
-
-  async patientById(id) {
-    return normalizePatient(this.state.patients.find((x) => x.id === id));
-  }
-
-  async patientByWallet(w) {
-    if (!w) return null;
-    return normalizePatient(
-      this.state.patients.find(
-        (x) => x.wallet.toLowerCase() === w.toLowerCase()
-      )
-    );
-  }
-
-  async allPatients() {
-    return this.state.patients.map(normalizePatient);
-  }
-
-  async addPatient(x) {
-    const criticalProvenance = Object.fromEntries(Object.keys(x.critical || {}).map(field =>
-      [field,{source:"Patient reported",author:canonicalizeWallet(x.wallet),updatedAt:x.createdAt}]));
-    const entry = normalizePatient({ ...x, criticalProvenance, wallet: canonicalizeWallet(x.wallet) });
-    this.state.patients.push(entry);
-    this.save();
-    return entry;
-  }
-
-  async updatePatient(id, patch) {
-    const index = this.state.patients.findIndex((x) => x.id === id);
-    if (index === -1) return null;
-    const x = this.state.patients[index];
-    if ((x.revision || 1) !== patch.revision) return null;
-    x.revision = (x.revision || 1) + 1;
-    if (patch.critical) {
-      x.summaryUpdatedAt = new Date().toISOString();
-      x.criticalProvenance ??= {};
-      for (const field of Object.keys(patch.critical)) {
-        x.criticalProvenance[field] = {source:"Patient reported",author:x.wallet,updatedAt:x.summaryUpdatedAt};
-      }
-    }
-    if (patch.profile) x.profile = { ...x.profile, ...patch.profile };
-    if (patch.critical) x.critical = { ...x.critical, ...patch.critical };
-    this.save();
-    return normalizePatient(x);
-  }
-
-  async recordsForPatient(id) {
-    return this.state.records
-      .filter((x) => x.patientId === id || x.patient_id === id)
-      .sort((a, b) => new Date(b.createdAt || b.created_at) - new Date(a.createdAt || a.created_at))
-      .map(normalizeRecord);
-  }
-
-  async recordById(patientId, recordId) {
-    const r = this.state.records.find(
-      (x) => (x.patientId === patientId || x.patient_id === patientId) && x.id === recordId
-    );
-    return normalizeRecord(r);
-  }
-
-  async addRecord(x) {
-    const entry = normalizeRecord(x);
-    this.state.records.push(entry);
-    this.save();
-    return entry;
-  }
-
-  async addAudit(x) {
-    const entry = normalizeAudit({
-      ...x,
-      timestamp: x.timestamp || new Date().toISOString(),
-      createdAt: x.createdAt || x.timestamp || new Date().toISOString(),
-    });
-    this.state.audit.push(entry);
-    this.save();
-    return entry;
-  }
-
-  async auditForPatient(id) {
-    return this.state.audit
-      .filter((x) => x.patientId === id || x.patient_id === id)
-      .sort((a, b) => new Date(b.timestamp || b.createdAt || b.created_at) - new Date(a.timestamp || a.createdAt || a.created_at))
-      .map(normalizeAudit);
-  }
-
-  async recentAudits(limit = 50) {
-    return this.state.audit
-      .slice()
-      .sort((a, b) => new Date(b.timestamp || b.createdAt || b.created_at) - new Date(a.timestamp || a.createdAt || a.created_at))
-      .slice(0, limit)
-      .map(normalizeAudit);
-  }
-
-  async auditById(id) {
-    const r = this.state.audit.find((x) => x.id === id);
-    if (!r) return null;
-    return normalizeAudit(r);
-  }
-
-  async providerByWallet(w) {
-    if (!w) return null;
-    return normalizeProvider(
-      this.state.providers.find(
-        (x) => x.wallet.toLowerCase() === w.toLowerCase()
-      )
-    );
-  }
-
-  async providerById(id) {
-    return normalizeProvider(this.state.providers.find((x) => x.id === id));
-  }
-
-  async providers(status) {
-    return this.state.providers
-      .filter((x) => !status || x.status === status)
-      .sort((a, b) => new Date(b.createdAt || b.created_at) - new Date(a.createdAt || a.created_at))
-      .map(normalizeProvider);
-  }
-
-  async addProvider(x) {
-    const entry = normalizeProvider({ ...x, wallet: canonicalizeWallet(x.wallet) });
-    this.state.providers.push(entry);
-    this.save();
-    return entry;
-  }
-
-  async grantConsent(x) {
-    this.state.consents = this.state.consents || [];
-    const e = this.state.consents.find(
-      (v) => (v.patientId === x.patientId || v.patient_id === x.patientId) && (v.providerId === x.providerId || v.provider_id === x.providerId)
-    );
-    if (e) {
-      Object.assign(e, x, { status: "active", revokedAt: null });
-    } else {
-      this.state.consents.push({ ...x, status: "active" });
-    }
-    this.save();
-    return normalizeConsent(e || x);
-  }
-
-  async revokeConsent(patientId, providerId) {
-    const x = (this.state.consents || []).find(
-      (v) =>
-        (v.patientId === patientId || v.patient_id === patientId) &&
-        (v.providerId === providerId || v.provider_id === providerId) &&
-        v.status === "active"
-    );
-    if (!x) return null;
-    x.status = "revoked";
-    x.revokedAt = new Date().toISOString();
-    this.save();
-    return normalizeConsent(x);
-  }
-
-  async hasActiveConsent(patientId, providerId, scope) {
-    const x = (this.state.consents || []).find(
-      (v) =>
-        (v.patientId === patientId || v.patient_id === patientId) &&
-        (v.providerId === providerId || v.provider_id === providerId) &&
-        v.status === "active"
-    );
-    if (!x) return false;
-    const now = new Date();
-    if (x.expiresAt && new Date(x.expiresAt) <= now) return false;
-    if (x.expires_at && new Date(x.expires_at) <= now) return false;
-    const s = typeof x.scope === 'string' ? JSON.parse(x.scope) : x.scope;
-    return Array.isArray(s) && s.includes(scope);
-  }
-
-  async consentsForPatient(id) {
-    return (this.state.consents || [])
-      .filter((v) => v.patientId === id || v.patient_id === id)
-      .map((v) => {
-        const p = this.state.providers.find((x) => x.id === (v.providerId || v.provider_id));
-        return normalizeConsent({
-          ...v,
-          provider_wallet: p?.wallet,
-          provider_name: p?.name,
-          provider_specialty: p?.specialty,
-        });
-      });
-  }
-
-  async consentsForProvider(providerId) {
-    return (this.state.consents || [])
-      .filter((v) => (v.providerId === providerId || v.provider_id === providerId) && v.status === "active")
-      .map((v) => {
-        const pt = this.state.patients.find((x) => x.id === (v.patientId || v.patient_id));
-        return normalizeConsent({
-          ...v,
-          patient_wallet: pt?.wallet,
-          patient_profile: pt?.profile,
-        });
-      });
-  }
-
-  async updateProvider(w, p) {
-    const index = this.state.providers.findIndex((x) => x.wallet.toLowerCase() === w.toLowerCase());
-    if (index === -1) return null;
-    const x = this.state.providers[index];
-    Object.assign(x, p);
-    this.save();
-    return normalizeProvider(x);
-  }
-  // --- Sessions (B11) ---
-  async createSession(x) {
-    this.state.sessions = this.state.sessions || [];
-    const session = { ...x, createdAt: x.createdAt || new Date().toISOString() };
-    this.state.sessions.push(session);
-    this.save();
-    return session;
-  }
-
-  async getSessionByHash(tokenHash) {
-    this.state.sessions = this.state.sessions || [];
-    return this.state.sessions.find((s) => s.tokenHash === tokenHash) || null;
-  }
-
-  async revokeSession(id) {
-    this.state.sessions = this.state.sessions || [];
-    const session = this.state.sessions.find((s) => s.id === id);
-    if (session) {
-      session.revokedAt = new Date().toISOString();
-      this.save();
-    }
-    return session || null;
-  }
-
-  async isSessionActive(id) {
-    this.state.sessions = this.state.sessions || [];
-    const s = this.state.sessions.find((x) => x.id === id);
-    if (!s || s.revokedAt) return false;
-    return new Date(s.expiresAt) > new Date();
-  }
-
-  // --- Key Registry (B2, B3) ---
-  async getKeyRecord(patientId) {
-    this.state.keys = this.state.keys || [];
-    const records = this.state.keys.filter((k) => k.patientId === patientId);
-    return records.length > 0 ? records[records.length - 1] : null;
-  }
-
-  async saveKeyRecord(x) {
-    this.state.keys = this.state.keys || [];
-    const record = { ...x, createdAt: x.createdAt || new Date().toISOString() };
-    this.state.keys.push(record);
-    this.save();
-    return record;
-  }
-
-  async shredKeyRecord(patientId) {
-    this.state.keys = this.state.keys || [];
-    const records = this.state.keys.filter((k) => k.patientId === patientId);
-    for (const r of records) {
-      r.status = "shredded";
-      r.encryptedDEK = "[CRYPTO_SHREDDED_PERMANENTLY_DESTROYED]";
-      r.rotatedAt = new Date().toISOString();
-    }
-    this.save();
-    return records;
-  }
-
-  // --- Break-Glass & Reviews (B6, B7) ---
-  async addBreakGlassEvent(x) {
-    this.state.breakGlassEvents = this.state.breakGlassEvents || [];
-    const event = { ...x, createdAt: x.createdAt || new Date().toISOString() };
-    this.state.breakGlassEvents.push(event);
-    this.save();
-    return event;
-  }
-
-  async getPendingBreakGlassReviews(limit = 50, offset = 0) {
-    this.state.breakGlassEvents = this.state.breakGlassEvents || [];
-    this.state.breakGlassReviews = this.state.breakGlassReviews || [];
-    const reviewedEventIds = new Set(this.state.breakGlassReviews.map((r) => r.eventId));
-    return this.state.breakGlassEvents
-      .filter((e) => !reviewedEventIds.has(e.id))
-      .slice(offset, offset + limit);
-  }
-
-  async addBreakGlassReview(x) {
-    this.state.breakGlassReviews = this.state.breakGlassReviews || [];
-    if (this.state.breakGlassReviews.some(r => r.eventId === x.eventId)) return null;
-    const review = { ...x, createdAt: x.createdAt || new Date().toISOString() };
-    this.state.breakGlassReviews.push(review);
-    this.save();
-    return review;
-  }
-
-  // --- Audit Events (Step 4 Audit) ---
-  async addAuditEvent(x) {
-    this.state.auditEvents = this.state.auditEvents || [];
-    const event = { ...x, sequenceNum: this.state.auditEvents.length + 1, createdAt: x.createdAt || new Date().toISOString() };
-    this.state.auditEvents.push(event);
-    this.save();
-    return event;
-  }
-
-  async getLastAuditEvent() {
-    this.state.auditEvents = this.state.auditEvents || [];
-    return this.state.auditEvents.length > 0
-      ? this.state.auditEvents[this.state.auditEvents.length - 1]
-      : null;
-  }
-
-  async getAuditEvents(patientId, limit = 50, offset = 0) {
-    this.state.auditEvents = this.state.auditEvents || [];
-    const events = patientId
-      ? this.state.auditEvents.filter((e) => e.patientId === patientId)
-      : this.state.auditEvents;
-    return events.slice(offset, offset + limit);
-  }
-
-  // --- Transactional Outbox (B13) ---
-  async addOutboxItem(x) {
-    this.state.outbox = this.state.outbox || [];
-    const item = { ...x, status: "pending", retries: 0, createdAt: x.createdAt || new Date().toISOString() };
-    this.state.outbox.push(item);
-    this.save();
-    return item;
-  }
-
-  async getPendingOutboxItems(limit = 10) {
-    this.state.outbox = this.state.outbox || [];
-    return this.state.outbox
-      .filter((i) => i.status === "pending" && i.retries < 5)
-      .slice(0, limit);
-  }
-
-  async markOutboxItemCompleted(id) {
-    this.state.outbox = this.state.outbox || [];
-    const item = this.state.outbox.find((i) => i.id === id);
-    if (item) {
-      item.status = "sent";
-      this.save();
-    }
-    return item;
-  }
-
-  async markOutboxItemFailed(id, error) {
-    this.state.outbox = this.state.outbox || [];
-    const item = this.state.outbox.find((i) => i.id === id);
-    if (item) {
-      item.retries = (item.retries || 0) + 1;
-      if (item.retries >= 5) item.status = "failed";
-      item.lastError = error;
-      this.save();
-    }
-    return item;
-  }
-
-  save(itemToUpdate) {
-    if (this.file === ":memory:") return itemToUpdate;
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    if (itemToUpdate && itemToUpdate.id) {
-      const auditIdx = this.state.audit.findIndex((a) => a.id === itemToUpdate.id);
-      if (auditIdx !== -1) {
-        this.state.audit[auditIdx] = { ...this.state.audit[auditIdx], ...itemToUpdate };
-      }
-    }
-    const t = this.file + ".tmp";
-    fs.writeFileSync(t, JSON.stringify(this.state, null, 2));
-    fs.renameSync(t, this.file);
-    return itemToUpdate;
-  }
-}
 
 async function createStore() {
-  const pool = createPool();
-  if (!pool) {
-    if (
-      process.env.NODE_ENV === "production" &&
-      process.env.ALLOW_INSECURE_LOCAL_STORE !== "true"
-    ) {
-      throw new Error(
-        "DATABASE_URL is missing. Insecure local JsonStore is disabled in production unless ALLOW_INSECURE_LOCAL_STORE=true is set."
-      );
-    }
-    return new JsonStore();
-  }
-  try {
-    await pool.query("SELECT 1");
-    return new PostgresStore(pool);
-  } catch (err) {
-    if (process.env.NODE_ENV === "production" || process.env.ALLOW_INSECURE_LOCAL_STORE !== "true") {
-      throw new Error(`PostgreSQL database connection failed in secure environment: ${err.message}`);
-    }
-    console.error("Warning: PostgreSQL database connection failed, falling back to JsonStore:", err.message);
-    return new JsonStore();
-  }
+  const pool=createPool();
+  if (!pool) throw new Error("DATABASE_URL is required");
+  try {await pool.query("SELECT 1");return new PostgresStore(pool);}
+  catch {await pool.end();throw new Error("PostgreSQL connection unavailable");}
 }
 
 module.exports = {
   createStore,
   PostgresStore,
-  JsonStore,
   canonicalizeWallet,
   normalizePatient,
   normalizeProvider,

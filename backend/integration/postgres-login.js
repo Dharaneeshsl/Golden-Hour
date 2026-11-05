@@ -38,8 +38,8 @@ test("rotated cards, conflicting edits and emergency reads through hospital APIs
   // The injected test pool deliberately does not exercise deployment TLS.
   const admin = Wallet.createRandom(), doctor = Wallet.createRandom(), patient = Wallet.createRandom();
   const settings = {
-    NODE_ENV:"production", HOSPITAL_NAME:"Synthetic hospital", AUTH_URI:"https://hospital.example", AUTH_DOMAIN:"hospital.example",
-    FRONTEND_ORIGIN:"https://hospital.example", DB_SSL:"true", DB_CA:"injected-test-pool",
+    NODE_ENV:"production", WALLET_AUTH_ENABLED:"true", HOSPITAL_NAME:"Synthetic hospital", AUTH_URI:"https://hospital.example", AUTH_DOMAIN:"hospital.example",
+    FRONTEND_ORIGIN:"https://hospital.example", DB_SSL:"true", DB_CA:"",
     ADMIN_WALLETS:admin.address, JWT_SECRET:require("crypto").randomBytes(48).toString("hex"),
     ENCRYPTION_KEY:process.env.RESTORE_TEST_KEY || require("crypto").randomBytes(32).toString("base64")
   };
@@ -92,6 +92,12 @@ test("rotated cards, conflicting edits and emergency reads through hospital APIs
   const archive = await app.get("/api/compliance/me/archive").set("Authorization",patientAuth).expect(200);
   assert.equal(archive.body.records[0].clinicalData.note,"Synthetic clinical data");
   await app.get("/api/compliance/me/archive").set("Authorization",doctorAuth).expect(403);
+  const dataRequest = await app.post("/api/compliance/dsr").set("Authorization",patientAuth)
+    .send({requestType:"access",details:"Synthetic archive request"}).expect(201);
+  const ownerRequests = await app.get("/api/compliance/me/requests").set("Authorization",patientAuth).expect(200);
+  assert.ok(ownerRequests.body.some(item=>item.id===dataRequest.body.dsr.id));
+  await app.post("/api/compliance/requests/" + dataRequest.body.dsr.id + "/resolve").set("Authorization",await login(admin))
+    .send({status:"completed",caseReference:"Synthetic completed case ACCESS-1"}).expect(200);
   const object = await pool.query("SELECT payload FROM encrypted_objects WHERE id=$1",[record.body.ipfsCid]);
   assert.equal(object.rows[0].payload.version,2);
   assert.ok(!JSON.stringify(object.rows[0]).includes("Synthetic clinical data"));
@@ -221,6 +227,19 @@ test("retention holds block erasure and ledger replay prevents restored data exp
   const store = new PostgresStore(pool);
   const patient = {id:crypto.randomUUID(),wallet:Wallet.createRandom().address,profile:{name:"Synthetic erasure fixture"},critical:{},createdAt:new Date().toISOString()};
   await store.addPatient(patient);
+  const envelope=new (require("../src/services/envelopeEncryptionService").EnvelopeEncryptionService)(process.env.RESTORE_TEST_KEY,store);
+  const recordId=crypto.randomUUID(),objectId=crypto.randomUUID(),eventId=crypto.randomUUID();
+  const encrypted=await envelope.encryptField(patient.id,{value:{note:"Synthetic deletion fixture"}},{patientId:patient.id,recordId});
+  await pool.query("INSERT INTO encrypted_objects(id,payload) VALUES($1,$2)",[objectId,encrypted]);
+  await store.addRecord({id:recordId,patientId:patient.id,recordType:"Synthetic",doctorId:"synthetic-clinician",ipfsCid:objectId,encryptedHash:"synthetic-hash",createdAt:new Date().toISOString()});
+  await store.replaceCard(patient.id,crypto.randomBytes(32).toString("hex"));
+  await pool.query("INSERT INTO break_glass_events(id,patient_id,doctor_id,reason_code,justification,facility,expires_at) VALUES($1,$2,$3,'TEST',$4,'Synthetic hospital',now()+interval '15 minutes')",[eventId,patient.id,crypto.randomUUID(),JSON.stringify(encrypted)]);
+  await pool.query("INSERT INTO break_glass_reviews(id,event_id,reviewer_id,decision,notes) VALUES($1,$2,'synthetic-admin','approved','Synthetic justification review')",[crypto.randomUUID(),eventId]);
+  await pool.query("INSERT INTO patient_recovery_requests(id,old_wallet,new_wallet,encrypted_reference) VALUES($1,$2,'synthetic-replacement',$3)",[crypto.randomUUID(),patient.wallet,encrypted]);
+  await store.beginArchive(patient.id,patient.wallet);
+  const cached=require("../src/services/encryptionService").encryptJson({body:Buffer.from(JSON.stringify({id:patient.id,critical:{allergies:["Synthetic"]}})).toString("base64"),contentType:"application/json"});
+  await pool.query("INSERT INTO mutation_requests(principal,route,request_key,payload_hash,status_code,encrypted_response) VALUES($1,'POST /api/patients','synthetic-erasure-key','synthetic',201,$2)",[patient.wallet+":synthetic:patient",cached]);
+  await pool.query("INSERT INTO outbox(id,topic,payload) VALUES($1,'SYNTHETIC',$2)",[crypto.randomUUID(),{patientId:patient.id}]);
   const requestId = crypto.randomUUID();
   await pool.query("INSERT INTO data_subject_requests(id,patient_id,request_type,details) VALUES ($1,$2,'erasure','Synthetic patient request')",[requestId,patient.id]);
   await pool.query("INSERT INTO patient_data_holds(patient_id,case_reference,updated_by) VALUES ($1,'Synthetic hold','operator')",[patient.id]);
@@ -232,6 +251,17 @@ test("retention holds block erasure and ledger replay prevents restored data exp
   const receipt = await erasePatient(store,ledger,options);
   assert.ok(receipt.receiptId);
   assert.equal(await store.patientById(patient.id),null);
+  for(const table of ["records","break_glass_events","emergency_cards","patient_archive_exports","files","qr_tokens","consents_v2"]){
+    assert.equal(Number((await pool.query(`SELECT count(*) FROM ${table} WHERE patient_id=$1`,[patient.id])).rows[0].count),0,table);
+  }
+  assert.equal((await pool.query("SELECT 1 FROM encrypted_objects WHERE id=$1",[objectId])).rowCount,0);
+  assert.equal((await pool.query("SELECT 1 FROM break_glass_reviews WHERE event_id=$1",[eventId])).rowCount,0);
+  assert.equal((await pool.query("SELECT 1 FROM patient_recovery_requests WHERE old_wallet=$1",[patient.wallet])).rowCount,0);
+  assert.equal((await pool.query("SELECT 1 FROM mutation_requests WHERE principal=$1",[patient.wallet+":synthetic:patient"])).rowCount,0);
+  assert.equal((await pool.query("SELECT 1 FROM outbox WHERE payload->>'patientId'=$1",[patient.id])).rowCount,0);
+  const shredded=(await pool.query("SELECT encrypted_dek,status FROM key_registry WHERE patient_id=$1",[patient.id])).rows;
+  assert.ok(shredded.length>0);assert.ok(shredded.every(row=>row.status==='shredded'&&row.encrypted_dek.includes('CRYPTO_SHREDDED')));
+  await assert.rejects(envelope.decryptField(patient.id,encrypted),/shredded/);
   await assertErasureLedgerApplied(store,ledger);
   await assert.rejects(ledger.query("DELETE FROM erasure_ledger"),/append-only/);
   // Simulate restoring the pre-erasure patient and receipt state from an older backup.
@@ -241,4 +271,31 @@ test("retention holds block erasure and ledger replay prevents restored data exp
   await replayLedger(store,ledger);
   assert.equal(await store.patientById(patient.id),null);
   await assertErasureLedgerApplied(store,ledger);
+});
+
+test("legacy private ciphertext upgrades to patient-bound encryption and retries safely",async t => {
+  const crypto = require("crypto");
+  const original = process.env.ENCRYPTION_KEY;
+  process.env.ENCRYPTION_KEY = process.env.RESTORE_TEST_KEY || crypto.randomBytes(32).toString("base64");
+  t.after(() => {if (original===undefined) delete process.env.ENCRYPTION_KEY;else process.env.ENCRYPTION_KEY=original;});
+  const pool = new Pool({connectionString:process.env.DATABASE_URL});
+  t.after(()=>pool.end());
+  const store = new PostgresStore(pool);
+  const patientId = crypto.randomUUID(), recordId=crypto.randomUUID(), objectId=crypto.randomUUID();
+  await store.addPatient({id:patientId,wallet:Wallet.createRandom().address,profile:{},critical:{},createdAt:new Date().toISOString()});
+  const encrypted = require("../src/services/encryptionService").encryptJson({note:"Synthetic clinical data"});
+  const {canonicalJsonStringify} = require("../src/controllers/recordController");
+  const hash = crypto.createHash("sha256").update(canonicalJsonStringify(encrypted)).digest("hex");
+  await pool.query("INSERT INTO encrypted_objects(id,payload) VALUES ($1,$2)",[objectId,encrypted]);
+  await store.addRecord({id:recordId,patientId,recordType:"Synthetic legacy record",doctorId:Wallet.createRandom().address,ipfsCid:objectId,encryptedHash:hash,createdAt:new Date().toISOString()});
+  const {migrate} = require("../scripts/migrate-private-records");
+  await migrate();
+  const record = await store.recordById(patientId,recordId);
+  assert.notEqual(record.ipfsCid,objectId);
+  const payload = (await pool.query("SELECT payload FROM encrypted_objects WHERE id=$1",[record.ipfsCid])).rows[0].payload;
+  assert.equal(payload.version,2);
+  const service = new (require("../src/services/envelopeEncryptionService").EnvelopeEncryptionService)(undefined,store);
+  assert.equal((await service.decryptField(patientId,payload)).value.note,"Synthetic clinical data");
+  await migrate();
+  assert.equal((await store.recordById(patientId,recordId)).ipfsCid,record.ipfsCid);
 });

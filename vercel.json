@@ -10,9 +10,14 @@
       "includeFiles": "backend/src/**"
     }
   },
-  "crons": [{"path":"/api/maintenance","schedule":"0 0 * * *"}],
   "rewrites": [
-    {"source": "/api/:path*", "destination": "/api/index"},
-    {"source": "/(.*)", "destination": "/index.html"}
+    {
+      "source": "/api/:path*",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
   ]
 }

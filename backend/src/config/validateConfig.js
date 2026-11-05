@@ -1,6 +1,6 @@
 const { getJwtSecret, INVALID_PLACEHOLDERS } = require("./authConfig");
 
-function validateStartupConfig() {
+function validateStartupConfig({otpProviderInjected=false}={}) {
   // 1. JWT Secret validation
   const jwtSecret = getJwtSecret();
   if (INVALID_PLACEHOLDERS.includes(jwtSecret)) {
@@ -22,23 +22,20 @@ function validateStartupConfig() {
     throw new Error("ENCRYPTION_KEY must be configured in production.");
   }
 
+  require("../services/encryptionService").getKeySet();
+
   // 3. Production environment constraints
   if (process.env.NODE_ENV === "production") {
-    if (process.env.DB_SSL !== "true" || process.env.DB_REJECT_UNAUTHORIZED === "false" || (!process.env.DB_CA && !process.env.DB_CA_PEM)) {
-      throw new Error("Production requires verified PostgreSQL TLS and DB_CA");
-    }
+    require("./databaseOptions").databaseOptions();
+    if (!otpProviderInjected && process.env.WALLET_AUTH_ENABLED!=="true" && (!process.env.MSG91_AUTH_KEY || !process.env.MSG91_FLOW_ID)) throw new Error("A configured phone OTP provider is required");
     if (!process.env.HOSPITAL_NAME?.trim()) throw new Error("HOSPITAL_NAME is required for a hospital deployment");
-    const database = new URL(process.env.DATABASE_URL);
-    if (["sslmode","sslrootcert","sslcert","sslkey","ssl"].some(key => database.searchParams.has(key))) {
-      throw new Error("Configure database TLS through DB_CA, not connection string overrides");
-    }
     const origin = new URL(process.env.AUTH_URI);
     if (origin.protocol !== "https:" || origin.host !== process.env.AUTH_DOMAIN ||
         origin.origin !== process.env.FRONTEND_ORIGIN) {
       throw new Error("Configure matching HTTPS login and frontend origins");
     }
-    if (!process.env.ADMIN_WALLETS) {
-      throw new Error("ADMIN_WALLETS environment variable must be configured in production.");
+    if (!process.env.ADMIN_WALLETS && !process.env.ADMIN_USER_IDS) {
+      throw new Error("ADMIN_USER_IDS environment variable must be configured in production.");
     }
     if (!process.env.DATABASE_URL) {
       throw new Error("DATABASE_URL must be configured in production.");

@@ -22,7 +22,7 @@ The real-database drill covers concurrent challenge redemption, wrong-domain tex
 
 ## Live-use decision
 
-Keep the [production engineering checklist](PRODUCTION_ENGINEERING_TODO.md) open until the release record includes operating evidence. Remaining work includes managed key custody and rotation, legacy data migration, privileged MFA and identity recovery, retention and deletion through backup restore, browser and capacity tests, production alert routing, restore and rollback drills, independent security testing, and hospital clinical acceptance. Record owners, findings, remediation and retest dates. Clinical approval, paying customers and uptime history require evidence from the operating business.
+Keep the [production engineering checklist](PRODUCTION_ENGINEERING_TODO.md) open until the release record includes operating evidence. Remaining work includes managed key custody and rotation, legacy data migration, live identity-verification procedures, production restore timing, hospital-device and capacity tests, production alert routing, restore and rollback drills, independent security testing, and hospital clinical acceptance. Record owners, findings, remediation and retest dates. Clinical approval, paying customers and uptime history require evidence from the operating business.
 
 
 ## Managed key service and incident response
@@ -34,3 +34,11 @@ For an existing database, keep the historical KMS_MASTER_KEY available, back up 
 Administrators can pause enrollment and emergency access in Incident controls. Changes persist in PostgreSQL and append an audit event in the same transaction. Pausing emergency access blocks further API reads and new grants across replicas. Notify clinicians to follow hospital procedure. Sensitive data already displayed on a device cannot be remotely recalled.
 
 The local PostgreSQL drill now exports a database backup, restores it into a second database and decrypts a synthetic clinical record there. This demonstrates the restore procedure on local PostgreSQL 18. Production backup retention, offsite storage, encryption and measured recovery time still require an operating deployment.
+
+## Offline QR and support configuration
+
+The frontend build produces manifest.webmanifest, PNG/SVG icons and a versioned service worker. It caches only a build-time allowlist of public assets; API responses are never added to that cache. Patients can explicitly save their newly issued QR credential on a private device for 24 hours and open /offline. No clinical summary is persisted for offline use. Expiry and sign-out remove the saved credential. Replacement/revocation is enforced online by the clinician API; a saved offline copy is not proof that a card is still valid.
+
+The gateway must serve /sw.js and SPA routes from the same HTTPS origin as the API. Do not add a CDN rule that caches /api responses. VITE_SUPPORT_EMAIL can be supplied at frontend build time; if omitted, the support screen directs users to the hospital desk/privacy contact. The status screen performs a liveness check and does not promise complete service availability.
+
+Run node scripts/pwa-browser.cjs from the repository root after the frontend build. This uses synthetic data on a local static server, checks service-worker isolation, expiry, camera QR decoding and logout cleanup, and sends no SMS.

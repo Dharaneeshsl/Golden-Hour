@@ -4,12 +4,13 @@ import { api } from "../api";
 export default function ConsentManager({ patientId }) {
   const [wallet, setWallet] = useState("");
   const [items, setItems] = useState([]);
+  const [cursor, setCursor] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const load = () => {
     if (!patientId) return;
-    api.consents(patientId).then(setItems).catch((e) => setError(e.message));
+    api.consentsPage(patientId).then(page=>{setItems(page.items);setCursor(page.nextCursor);}).catch((e) => setError(e.message));
   };
 
   useEffect(load, [patientId]);
@@ -20,7 +21,7 @@ export default function ConsentManager({ patientId }) {
     setBusy(true);
     setError("");
     try {
-      await api.grantConsent(patientId, { wallet: wallet.trim(), scope: ["records"] });
+      await api.grantConsent(patientId, { phone: wallet.trim(), scope: ["records"] });
       setWallet("");
       await load();
     } catch (e) {
@@ -55,7 +56,7 @@ export default function ConsentManager({ patientId }) {
           required
           value={wallet}
           onChange={(e) => setWallet(e.target.value)}
-          placeholder="Verified Provider Wallet (0x...)"
+          placeholder="Clinician mobile number (+91…)"
         />
         <button className="secondary" disabled={busy}>
           {busy ? "Processing…" : "Grant Consent"}
@@ -64,6 +65,12 @@ export default function ConsentManager({ patientId }) {
 
       {error && <p className="error" style={{ color: "#ef4444", marginTop: "0.5rem" }}>{error}</p>}
 
+      {cursor && <button disabled={busy} onClick={async () => {
+        setBusy(true);
+        try {const page=await api.consentsPage(patientId,cursor);setItems(rows=>[...rows,...page.items]);setCursor(page.nextCursor);}
+        catch (err) {setError(err.message);}
+        finally {setBusy(false);}
+      }}>Load older consent grants</button>}
       <div style={{ marginTop: "1rem" }}>
         {items.length === 0 ? (
           <p className="muted">No active or historic consent grants.</p>
@@ -72,7 +79,7 @@ export default function ConsentManager({ patientId }) {
             <div className="data-row" key={x.id}>
               <span>
                 <b>{x.providerName || "Clinician Provider"}</b>
-                <small style={{ fontFamily: "monospace" }}>{x.providerWallet || "Wallet unavailable"}</small>
+                <small style={{ fontFamily: "monospace" }}>{x.providerWallet || "Account unavailable"}</small>
                 <small>Granted: {new Date(x.grantedAt || x.granted_at).toLocaleString()}</small>
               </span>
               <b>{x.status.toUpperCase()}</b>

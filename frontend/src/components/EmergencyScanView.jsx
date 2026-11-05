@@ -1,3 +1,5 @@
+import CardScanner from "./CardScanner";
+import SummaryFreshness from "./SummaryFreshness";
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { api, getToken } from "../api";
@@ -37,7 +39,7 @@ export default function EmergencyScanView({ initialPatientId = "", cardToken }) 
 
   const submitBreakGlass = async () => {
     if (!token) {
-      setError("Clinician authentication required. Please connect your verified provider wallet.");
+      setError("Clinician authentication required. Please connect your hospital staff account.");
       return;
     }
     if (!cardToken && !patientId.trim()) {
@@ -99,12 +101,12 @@ export default function EmergencyScanView({ initialPatientId = "", cardToken }) 
         <div className="panel error-box">
           <h3>Authentication Required</h3>
           {cardToken && <Link to="/login" state={{cardToken}}>Sign in to open this card</Link>}
-          <p>You must connect a verified clinician wallet to request emergency access.</p>
+          <p>You must connect a hospital staff account to request emergency access.</p>
         </div>
       )}
 
       <div className="panel">
-        <h3>Emergency Patient Lookup</h3>
+        <h3>Emergency Patient Lookup</h3>{!cardToken && <CardScanner />}
         {cardToken ? <label><input type="checkbox" checked={identityConfirmed} onChange={event => setIdentityConfirmed(event.target.checked)} /> I confirmed patient identity using hospital procedure.</label> : <><label>Patient ID</label>
         <input
           value={patientId}
@@ -172,6 +174,7 @@ export default function EmergencyScanView({ initialPatientId = "", cardToken }) 
               {new Date(criticalData.expiresAt).toLocaleTimeString()}.
             </p>
             <p>{criticalData.source}. Last updated {criticalData.summaryUpdatedAt ? new Date(criticalData.summaryUpdatedAt).toLocaleString() : "unknown"}.</p>
+            <SummaryFreshness updatedAt={criticalData.summaryUpdatedAt} />
             <div className="critical-grid">
               <div>
                 <span>Blood Group</span>

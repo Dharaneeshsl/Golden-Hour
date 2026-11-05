@@ -603,3 +603,10 @@ footer {
   body:has(.qr svg) .qr svg, body:has(.qr svg) .qr svg * { visibility: visible; }
   body:has(.qr svg) .qr svg { position: absolute; top: 1cm; left: 1cm; }
 }
+:focus-visible { outline: 3px solid #fbbf24; outline-offset: 3px; }
+.skip-link { position: absolute; left: -10000px; top: 0; z-index: 1000; background: #101827; color: #fff; padding: 16px; }
+.skip-link:focus { left: 0; }
+button, input, select, textarea { font: inherit; }
+button, nav a { min-height: 44px; }
+@media (max-width:850px) { header { flex-wrap:wrap; height:auto; gap:12px; padding:16px; } nav { display:flex; flex-wrap:wrap; } footer { flex-wrap:wrap; gap:12px; } }
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }

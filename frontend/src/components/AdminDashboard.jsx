@@ -1,3 +1,6 @@
+import AuditExport from "./AuditExport";
+import StaffImport from "./StaffImport";
+import {reviewAge} from "../utils/staffCsv";
 import { useEffect, useState } from "react";
 import { api } from "../api";
 
@@ -16,6 +19,10 @@ export default function AdminDashboard() {
   const [holdPatient, setHoldPatient] = useState("");
   const [holdReference, setHoldReference] = useState("");
   const [holdActive, setHoldActive] = useState(true);
+  const [providerCursor, setProviderCursor] = useState(null);
+  const [patientCursor, setPatientCursor] = useState(null);
+  const [auditCursor, setAuditCursor] = useState(null);
+  const [reviewCursor, setReviewCursor] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [patients, setPatients] = useState([]);
   const [audits, setAudits] = useState([]);
@@ -23,13 +30,13 @@ export default function AdminDashboard() {
   const [busy, setBusy] = useState("");
 
   const loadProviders = () =>
-    api.providers(providerStatus).then(setProviders).catch((e) => setError(e.message));
+    api.providersPage(providerStatus).then(page=>{setProviders(page.items);setProviderCursor(page.nextCursor);}).catch((e) => setError(e.message));
 
   const loadPatients = () =>
-    api.allPatients().then(setPatients).catch((e) => setError(e.message));
+    api.patientsPage().then(page=>{setPatients(page.items);setPatientCursor(page.nextCursor);}).catch((e) => setError(e.message));
 
   const loadAudits = () =>
-    api.recentAudits().then(setAudits).catch((e) => setError(e.message));
+    api.recentAuditsPage().then(page=>{setAudits(page.items);setAuditCursor(page.nextCursor);}).catch((e) => setError(e.message));
 
   useEffect(() => {
     setError("");
@@ -39,7 +46,7 @@ export default function AdminDashboard() {
     else if (activeTab === "recovery") api.recoveries().then(setRecoveries).catch(e => setError(e.message));
     else if (activeTab === "jobs") api.jobs().then(setJobs).catch(e => setError(e.message));
     else if (activeTab === "data") api.dataRequests().then(setDataRequests).catch(e => setError(e.message));
-    else if (activeTab === "reviews") api.pendingReviews().then(setReviews).catch(e => setError(e.message));
+    else if (activeTab === "reviews") api.pendingReviewsPage().then(page=>{setReviews(page.items);setReviewCursor(page.nextCursor);}).catch(e => setError(e.message));
     else if (activeTab === "audits") loadAudits();
   }, [activeTab, providerStatus]);
 
@@ -93,15 +100,26 @@ export default function AdminDashboard() {
           <button onClick={() => setActiveTab("reviews")}>Pending reviews</button>
         </div>
 
+        {((activeTab==="providers" && providerCursor) || (activeTab==="patients" && patientCursor) ||
+          (activeTab==="audits" && auditCursor) || (activeTab==="reviews" && reviewCursor)) && <button disabled={!!busy} onClick={async () => {
+          setBusy("page");
+          try {
+            if (activeTab==="providers") {const page=await api.providersPage(providerStatus,providerCursor);setProviders(rows=>[...rows,...page.items]);setProviderCursor(page.nextCursor);}
+            if (activeTab==="patients") {const page=await api.patientsPage(patientCursor);setPatients(rows=>[...rows,...page.items]);setPatientCursor(page.nextCursor);}
+            if (activeTab==="audits") {const page=await api.recentAuditsPage(auditCursor);setAudits(rows=>[...rows,...page.items]);setAuditCursor(page.nextCursor);}
+            if (activeTab==="reviews") {const page=await api.pendingReviewsPage(reviewCursor);setReviews(rows=>[...rows,...page.items]);setReviewCursor(page.nextCursor);}
+          } catch (err) {setError(err.message);}
+          finally {setBusy("");}
+        }}>Load more</button>}
         {error && <p className="error">{error}</p>}
 
         {activeTab === "recovery" && <section>
           <h3>Patient account recovery</h3>
-          <p>Two different administrators must independently verify the patient through hospital procedure. Approval replaces the wallet and revokes prior sessions, cards and consent grants.</p>
+          <p>Two different administrators must independently verify the patient through hospital procedure. Approval updates the patient account and revokes prior sessions, cards and consent grants.</p>
           <label><input type="checkbox" checked={identityConfirmed} onChange={e => setIdentityConfirmed(e.target.checked)} /> I completed the hospital identity check for the request I am reviewing.</label>
           {recoveries.map(item => <article key={item.id}>
             <p>Case {item.proofReference} · {item.approvals.length} approvals</p>
-            <p>Previous wallet {item.oldWallet}</p><p>New wallet {item.newWallet}</p>
+            <p>Previous account {item.oldWallet}</p><p>New account {item.newWallet}</p>
             {["approve","reject"].map(decision => <button key={decision} disabled={!!busy || (decision==="approve" && !identityConfirmed)} onClick={async () => {
               setBusy(item.id);
               try {await api.reviewRecovery(item.id,decision);setRecoveries(await api.recoveries());setIdentityConfirmed(false);}
@@ -128,7 +146,25 @@ export default function AdminDashboard() {
         {activeTab === "data" && <section>
           <h3>Patient data requests and retention holds</h3>
           <p>Clinical erasure requires an authorized hospital operator to review retention and approvals. This screen records retention holds.</p>
-          {dataRequests.map(item => <p key={item.id}>{item.request_type} · {item.status} · Request {item.id} · Patient {item.patient_id}</p>)}
+          {dataRequests.map(item => <article key={item.id}>
+            <p>{item.request_type} · {item.status} · Request {item.id} · Patient {item.patient_id}</p>
+            {!["completed","rejected"].includes(item.status) && <form onSubmit={async event => {
+              event.preventDefault();setBusy(item.id);setError("");
+              const form = new FormData(event.currentTarget);
+              try {
+                await api.resolveDataRequest(item.id,{status:form.get("decision"),caseReference:form.get("case")});
+                setDataRequests(await api.dataRequests());
+              } catch (err) {setError(err.message);}
+              finally {setBusy("");}
+            }}>
+              <label>Hospital resolution case reference<input name="case" required minLength={10} /></label>
+              <label>Decision<select name="decision">
+                {item.request_type!=="erasure" && <option value="completed">Completed through hospital procedure</option>}
+                <option value="rejected">Rejected with hospital review</option>
+              </select></label>
+              <button disabled={!!busy}>Record resolution</button>
+            </form>}
+          </article>)}
           <form onSubmit={async event => {
             event.preventDefault();setBusy("hold");setError("");
             try {await api.setRetentionHold(holdPatient,{active:holdActive,caseReference:holdReference});setHoldReference("");}
@@ -152,12 +188,13 @@ export default function AdminDashboard() {
               finally {setBusy("");}
             }}>{key === "enrollment_paused" ? "Patient enrollment" : "Emergency access"} — {operations[key] ? "Paused · resume" : "Active · pause"}</button>)}
         </section>}
+        {activeTab === "audits" && <AuditExport />}
         {activeTab === "reviews" && <section>
           <h3>Review emergency access</h3>
           {reviews.length === 0 && <p>No pending reviews.</p>}
           {reviews.map(event => <article key={event.id}>
             <p>{event.facility} · {event.reasonCode || event.reason_code} · {new Date(event.createdAt || event.created_at).toLocaleString()}</p>
-            <p>Access reference {event.id}</p>
+            <p>Access reference {event.id}</p><p>{reviewAge(event.createdAt || event.created_at)}</p>
             {["approved", "investigation_required"].map(decision =>
               <button key={decision} disabled={!!busy} onClick={async () => {
                 setBusy(event.id);
@@ -170,13 +207,14 @@ export default function AdminDashboard() {
           </article>)}
         </section>}
 
+        {activeTab === "providers" && <StaffImport />}
         {activeTab === "providers" && <form onSubmit={async event => {
           event.preventDefault(); setBusy("invitation"); setError("");
           try {setInvitation(await api.inviteStaff(inviteWallet));setInviteWallet("");}
           catch (err) {setError(err.message);}
           finally {setBusy("");}
         }}>
-          <label htmlFor="invite-wallet">Invite a clinician wallet</label>
+          <label htmlFor="invite-wallet">Invite a clinician mobile number</label>
           <input id="invite-wallet" value={inviteWallet} onChange={event => setInviteWallet(event.target.value)} required />
           <button disabled={!!busy}>Create invitation</button>
           {invitation && <p>Share this one-use invitation with the clinician through your hospital’s approved channel. It expires in 24 hours. <code>{invitation.token}</code></p>}
@@ -264,7 +302,7 @@ export default function AdminDashboard() {
                 <div className="data-row" key={pt.id}>
                   <span>
                     <b>Patient ID: {pt.id}</b>
-                    <small style={{ fontFamily: "monospace" }}>Wallet: {pt.wallet}</small>
+                    <small style={{ fontFamily: "monospace" }}>Account: {pt.wallet}</small>
                     <small>Registered: {new Date(pt.created_at || pt.createdAt).toLocaleString()}</small>
                   </span>
                   <div>

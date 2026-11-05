@@ -52,7 +52,7 @@ describe("Dashboard Components Mount & Render Regression Suite", () => {
 
   it("mounts and renders EmergencyScanView without missing inputs or state crashes", () => {
     const html = renderToString(
-      React.createElement(EmergencyScanView, { initialPatientId: "p-test-1" })
+      React.createElement(MemoryRouter, null, React.createElement(EmergencyScanView, { initialPatientId: "p-test-1" }))
     );
     expect(html).toBeTruthy();
     expect(html).toContain("Break-Glass Emergency Access");

@@ -1,12 +1,18 @@
+const {cookieValue} = require("../utils/authCookies");
 const jwt = require("jsonwebtoken");
 const { getJwtSecret, isCurrentAdmin } = require("../config/authConfig");
 const { canonicalizeWallet } = require("../config/db");
 
 async function requireAuth(req, res, next) {
-  const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const authorization = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const token = authorization || cookieValue(req.headers.cookie,"gh_access");
   if (!token) return res.status(401).json({ error: "Authentication token required" });
 
   try {
+    if (!authorization && !["GET","HEAD","OPTIONS"].includes(req.method)) {
+      const allowed = (process.env.FRONTEND_ORIGIN || "").split(",").map(value=>value.trim());
+      if (!allowed.includes(req.headers.origin)) return res.status(403).json({error:"Invalid request origin"});
+    }
     const secret = getJwtSecret();
     const payload = jwt.verify(token, secret, { algorithms: ["HS256"], issuer: "goldenhour" });
 
@@ -23,6 +29,10 @@ async function requireAuth(req, res, next) {
 
     // Check server-side session revocation if session ID is attached (B11)
     const store = req.app ? req.app.get("store") : null;
+    if (store?.query && payload.userId) {
+      const account=(await store.query("SELECT status FROM users WHERE id=$1",[payload.userId])).rows[0];
+      if (!account || account.status!=="active") return res.status(401).json({error:"Account unavailable"});
+    }
     if (store && payload.sessionId && store.isSessionActive) {
       const active = await store.isSessionActive(payload.sessionId);
       if (!active) {

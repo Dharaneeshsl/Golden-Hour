@@ -1,3 +1,5 @@
+const {pagination,pageResponse,memoryPage} = require("../utils/pagination");
+const {ownsPatient} = require("../utils/identity");
 const crypto = require("crypto");
 const { canonicalizeWallet } = require("../config/db");
 const { asyncHandler } = require("../utils/asyncHandler");
@@ -29,11 +31,16 @@ function createConsentController({ store, chain, auditChain }) {
       if (req.user.role === "admin") {
         return res.status(403).json({ error: "Administrators have read-only consent oversight" });
       }
-      if (patientWallet !== reqWallet) {
+      if (!ownsPatient(patient,req.user)) {
         return res.status(403).json({ error: "Only the patient can grant consent" });
       }
 
-      const providerWallet = canonicalizeWallet(req.body.wallet);
+      let identity = req.body.wallet;
+      if (req.body.phone && store.query) {
+        const row=(await store.query("SELECT user_id FROM identities WHERE provider_type='phone_otp' AND identifier=$1",[req.body.phone])).rows[0];
+        identity=row ? "user:"+row.user_id : null;
+      }
+      const providerWallet = canonicalizeWallet(identity);
       const provider = await store.providerByWallet(providerWallet);
       if (!provider || provider.status !== "verified") {
         return res.status(400).json({ error: "A verified provider wallet is required" });
@@ -104,7 +111,7 @@ function createConsentController({ store, chain, auditChain }) {
           providerSpecialty: provider.specialty,
         });
       } catch (e) {
-        console.error("Consent grant error:", e);
+        console.error("Consent grant error:", {name:e.name, code:e.code || "INTERNAL_ERROR"});
         res.status(502).json({ error: "Consent grant failed" });
       }
     }),
@@ -116,7 +123,7 @@ function createConsentController({ store, chain, auditChain }) {
       const reqWallet = canonicalizeWallet(req.user.wallet);
       const patientWallet = canonicalizeWallet(patient.wallet);
 
-      if (patientWallet !== reqWallet) {
+      if (!ownsPatient(patient,req.user)) {
         return res.status(403).json({ error: "Only the patient can revoke consent" });
       }
 
@@ -162,7 +169,7 @@ function createConsentController({ store, chain, auditChain }) {
 
         res.json(consent);
       } catch (e) {
-        console.error("Consent revocation error:", e);
+        console.error("Consent revocation error:", {name:e.name, code:e.code || "INTERNAL_ERROR"});
         res.status(502).json({ error: "Consent revocation failed" });
       }
     }),
@@ -174,11 +181,14 @@ function createConsentController({ store, chain, auditChain }) {
       const reqWallet = canonicalizeWallet(req.user.wallet);
       const patientWallet = canonicalizeWallet(patient.wallet);
 
-      if (req.user.role !== "admin" && patientWallet !== reqWallet) {
+      if (req.user.role !== "admin" && !ownsPatient(patient,req.user)) {
         return res.status(403).json({ error: "Patient consent access denied" });
       }
 
-      res.json(await store.consentsForPatient(patient.id));
+      const page = pagination(req.query);
+      const rows = store.listPatientConsentsPage ? await store.listPatientConsentsPage(patient.id,page)
+        : memoryPage(await store.consentsForPatient(patient.id),page,"grantedAt");
+      return pageResponse(res,rows,page,"grantedAt");
     }),
 
     forPatient: asyncHandler(async (req, res) => {
@@ -188,11 +198,14 @@ function createConsentController({ store, chain, auditChain }) {
       const reqWallet = canonicalizeWallet(req.user.wallet);
       const patientWallet = canonicalizeWallet(patient.wallet);
 
-      if (req.user.role !== "admin" && patientWallet !== reqWallet) {
+      if (req.user.role !== "admin" && !ownsPatient(patient,req.user)) {
         return res.status(403).json({ error: "Patient consent access denied" });
       }
 
-      res.json(await store.consentsForPatient(patient.id));
+      const page = pagination(req.query);
+      const rows = store.listPatientConsentsPage ? await store.listPatientConsentsPage(patient.id,page)
+        : memoryPage(await store.consentsForPatient(patient.id),page,"grantedAt");
+      return pageResponse(res,rows,page,"grantedAt");
     }),
 
     listForProvider: asyncHandler(async (req, res) => {
@@ -202,7 +215,10 @@ function createConsentController({ store, chain, auditChain }) {
         return res.status(403).json({ error: "Verified provider access required" });
       }
 
-      res.json(await store.consentsForProvider(provider.id));
+      const page = pagination(req.query);
+      const rows = store.listProviderConsentsPage ? await store.listProviderConsentsPage(provider.id,page)
+        : memoryPage(await store.consentsForProvider(provider.id),page,"grantedAt");
+      return pageResponse(res,rows,page,"grantedAt");
     }),
 
     forProvider: asyncHandler(async (req, res) => {
@@ -212,7 +228,10 @@ function createConsentController({ store, chain, auditChain }) {
         return res.status(403).json({ error: "Verified provider access required" });
       }
 
-      res.json(await store.consentsForProvider(provider.id));
+      const page = pagination(req.query);
+      const rows = store.listProviderConsentsPage ? await store.listProviderConsentsPage(provider.id,page)
+        : memoryPage(await store.consentsForProvider(provider.id),page,"grantedAt");
+      return pageResponse(res,rows,page,"grantedAt");
     }),
   };
 }

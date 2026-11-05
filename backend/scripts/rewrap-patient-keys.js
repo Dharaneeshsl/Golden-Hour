@@ -1,13 +1,13 @@
 const {Pool} = require("pg");
 const {VaultKeyService} = require("../src/services/vaultKeyService");
 const {EnvelopeEncryptionService} = require("../src/services/envelopeEncryptionService");
-const {getDbSslConfig} = require("../src/config/migrate");
+const {databaseOptions} = require("../src/config/migrate");
 const {PostgresStore} = require("../src/config/db");
 
 async function rewrap() {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL required");
   const vault = new VaultKeyService();
-  const pool = new Pool({connectionString:process.env.DATABASE_URL,ssl:getDbSslConfig()});
+  const pool = new Pool(databaseOptions());
   try {
     const store = new PostgresStore(pool);
     const legacy = new EnvelopeEncryptionService(process.env.KMS_MASTER_KEY, store, vault);
@@ -18,7 +18,7 @@ async function rewrap() {
         ciphertext = await vault.rewrap(row.encrypted_dek);
       } else {
         // Unwrap through the existing reader while retaining the historical master key.
-        const raw = await legacy.unwrapPatientDEK(row.patient_id);
+        const raw = await legacy.unwrapKeyRecord({encryptedDEK:row.encrypted_dek,status:"active"});
         try { ciphertext = await vault.wrap(raw); } finally {raw.fill(0);}
       }
       await pool.query("UPDATE key_registry SET encrypted_dek=$3,rotated_at=now() WHERE key_id=$1 AND encrypted_dek=$2 AND status='active'",

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clearBrowserSession, fullLogoutCleanup, isWalletDisconnected, markWalletConnected } from "./session";
+import { clearBrowserSession, fullLogoutCleanup, markAuthenticated } from "./session";
 
 function memoryStorage() {
   const data = new Map();
@@ -53,27 +53,22 @@ describe("session cleanup", () => {
     expect(localStorage.getItem("goldenhour_user")).toBeNull();
     expect(sessionStorage.getItem("goldenhour_tmp")).toBeNull();
     expect(localStorage.getItem("unrelated")).toBe("keep");
-    expect(isWalletDisconnected()).toBe(true);
+    expect(localStorage.getItem("goldenhour_signed_out")).toBe("true");
   });
 
-  it("revokes wallet permissions when logging out fully", async () => {
-    const request = vi.fn().mockResolvedValue(undefined);
-    window.ethereum = { request };
-    localStorage.setItem("goldenhour_token", "tok");
-
+  it("revokes the server session when signing out", async () => {
+    const send=vi.fn().mockResolvedValue({ok:true});
+    vi.stubGlobal("fetch",send);
+    localStorage.setItem("goldenhour_authenticated","true");
     await fullLogoutCleanup();
-
-    expect(localStorage.getItem("goldenhour_token")).toBeNull();
-    expect(isWalletDisconnected()).toBe(true);
-    expect(request).toHaveBeenCalledWith({
-      method: "wallet_revokePermissions",
-      params: [{ eth_accounts: {} }],
-    });
+    expect(localStorage.getItem("goldenhour_authenticated")).toBeNull();
+    expect(send).toHaveBeenCalledWith(expect.stringContaining("/api/auth/logout"),{method:"POST",credentials:"include"});
   });
 
   it("clears the disconnected flag on a new connection", () => {
     clearBrowserSession();
-    markWalletConnected();
-    expect(isWalletDisconnected()).toBe(false);
+    markAuthenticated();
+    expect(localStorage.getItem("goldenhour_signed_out")).toBeNull();
+    expect(localStorage.getItem("goldenhour_authenticated")).toBe("true");
   });
 });

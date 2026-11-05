@@ -18,6 +18,8 @@ export default function DoctorDashboard({ wallet }) {
   const [recordType, setRecordType] = useState("Consultation");
   const [clinicalData, setClinicalData] = useState('{\n  "summary": "Routine consultation",\n  "notes": "Patient stable"\n}');
   const [records, setRecords] = useState([]);
+  const [recordCursor, setRecordCursor] = useState(null);
+  const [consentCursor, setConsentCursor] = useState(null);
   const [selected, setSelected] = useState(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -29,7 +31,7 @@ export default function DoctorDashboard({ wallet }) {
       .then((data) => {
         setProvider(data);
         if (data.status === "verified") {
-          api.providerConsents().then(setActiveConsents).catch(console.error);
+          api.providerConsentsPage().then(page=>{setActiveConsents(page.items);setConsentCursor(page.nextCursor);}).catch(console.error);
         }
       })
       .catch((err) => {
@@ -84,7 +86,8 @@ export default function DoctorDashboard({ wallet }) {
     setBusy(true);
     setNotice("");
     try {
-      setRecords(await api.records(target));
+      const page = await api.recordsPage(target);
+      setRecords(page.items);setRecordCursor(page.nextCursor);
       setSelected(null);
       setError("");
     } catch (e) {
@@ -153,7 +156,7 @@ export default function DoctorDashboard({ wallet }) {
           <p className="eyebrow">Provider Onboarding</p>
           <h2>Register as a Healthcare Provider</h2>
           <p className="muted" style={{ fontFamily: "monospace", fontSize: "0.85rem" }}>
-            Wallet: {wallet}
+            Account: {wallet}
           </p>
           <label>
             Full Name
@@ -224,6 +227,12 @@ export default function DoctorDashboard({ wallet }) {
               </div>
             )}
 
+            {consentCursor && <button disabled={busy} onClick={async () => {
+              setBusy(true);
+              try {const page=await api.providerConsentsPage(consentCursor);setActiveConsents(rows=>[...rows,...page.items]);setConsentCursor(page.nextCursor);}
+              catch (err) {setError(err.message);}
+              finally {setBusy(false);}
+            }}>Load more consented patients</button>}
             <h3>Search Patient Records</h3>
             <input
               value={patientId}
@@ -246,6 +255,12 @@ export default function DoctorDashboard({ wallet }) {
               </div>
             ))}
 
+            {recordCursor && <button disabled={busy} onClick={async () => {
+              setBusy(true);
+              try {const page=await api.recordsPage(patientId,recordCursor);setRecords(rows=>[...rows,...page.items]);setRecordCursor(page.nextCursor);}
+              catch (err) {setError(err.message);}
+              finally {setBusy(false);}
+            }}>Load older records</button>}
             {selected && (
               <div className="record-detail" style={{ marginTop: "1rem", padding: "1rem", background: "rgba(255,255,255,0.05)", borderRadius: "8px" }}>
                 <h4>{selected.recordType}</h4>

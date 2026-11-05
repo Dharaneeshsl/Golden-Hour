@@ -1,38 +1,42 @@
 import { lazy, Suspense, useState, useEffect, useRef } from "react";
 import { Link, Route, Routes, useNavigate, useParams, Navigate } from "react-router-dom";
-import WalletConnectButton from "./components/WalletConnectButton";
+
 import ErrorBoundary from "./components/ErrorBoundary";
 import { fullLogoutCleanup } from "./utils/session";
+import { I18nProvider, useI18n, LanguageSelector } from "./config/i18n";
 
 const PatientDashboard = lazy(() => import("./components/PatientDashboard"));
 const DoctorDashboard = lazy(() => import("./components/DoctorDashboard"));
 const EmergencyScanView = lazy(() => import("./components/EmergencyScanView"));
 const PatientOnboarding = lazy(() => import("./components/PatientOnboarding"));
 const AdminDashboard = lazy(() => import("./components/AdminDashboard"));
+const OfflineCard = lazy(() => import("./components/OfflineCard"));
+const Support = lazy(() => import("./components/Support"));
 const Login = lazy(() => import("./pages/login"));
 
 function Home({ user }) {
+  const { t } = useI18n();
   return (
     <section className="hero">
       <div>
-        <p className="eyebrow">Every second matters</p>
-        <h1>Medical context when <em>minutes matter.</em></h1>
+        <p className="eyebrow">{t("everySecondMatters")}</p>
+        <h1>{t("heroTitle")}</h1>
         <p className="lead">
-          Encrypted records, wallet-verified authentication, patient-controlled access, and logged access history.
+          {t("heroLead")}
         </p>
         <div className="hero-actions">
           {!user ? (
-            <Link className="primary" to="/login">Sign In / Register</Link>
+            <Link className="primary" to="/login">{t("signInRegister")}</Link>
           ) : user.role === "admin" ? (
-            <Link className="primary" to="/admin">Go to Admin Portal</Link>
+            <Link className="primary" to="/admin">{t("goToAdmin")}</Link>
           ) : user.role === "doctor" ? (
-            <Link className="primary" to="/doctor">Go to Provider Portal</Link>
+            <Link className="primary" to="/doctor">{t("goToProvider")}</Link>
           ) : (
             <Link className="primary" to={user.patientId ? "/patient/me" : "/onboarding"}>
-              {user.patientId ? "Go to Patient Portal" : "Complete Patient Onboarding"}
+              {user.patientId ? t("goToPatient") : t("completeOnboarding")}
             </Link>
           )}
-          <Link className="secondary" to="/emergency">Emergency Access</Link>
+          <Link className="secondary" to="/emergency">{t("emergencyAccess")}</Link>
         </div>
       </div>
     </section>
@@ -69,19 +73,20 @@ function EmergencyRoute() {
   return <EmergencyScanView initialPatientId={id === "card" ? "" : id || ""} cardToken={id === "card" ? window.location.hash.slice(1) : undefined} />;
 }
 
-export default function App() {
+function AppContent() {
+  const { t } = useI18n();
   const [user, setUser] = useState(() =>
     JSON.parse(localStorage.getItem("goldenhour_user") || "null")
   );
   const navigate = useNavigate();
   const loggingOutRef = useRef(false);
   const sessionGen = useRef(0);
-  const ignoreEmptyAccountsUntil = useRef(0);
+  const [sessionNotice, setSessionNotice] = useState("");
 
   const login = (next) => {
     sessionGen.current += 1;
     loggingOutRef.current = false;
-    ignoreEmptyAccountsUntil.current = Date.now() + 2000;
+    setSessionNotice("");
     localStorage.setItem("goldenhour_user", JSON.stringify(next));
     setUser(next);
   };
@@ -99,7 +104,7 @@ export default function App() {
     loggingOutRef.current = true;
     const gen = sessionGen.current;
     setUser(null);
-    void fullLogoutCleanup().finally(() => {
+    void fullLogoutCleanup().catch(error => setSessionNotice(error.message)).finally(() => {
       if (sessionGen.current !== gen) return;
       navigate("/login");
     });
@@ -110,124 +115,115 @@ export default function App() {
       logout();
     };
     window.addEventListener("goldenhour_session_expired", handleExpired);
-
-    const handleAccountsChanged = (accounts) => {
-      if (!user || loggingOutRef.current) return;
-      if (!accounts || accounts.length === 0) {
-        if (Date.now() < ignoreEmptyAccountsUntil.current) return;
-        logout();
-        return;
-      }
-      const newAddress = accounts[0].toLowerCase();
-      const currentAddress = (user.wallet || "").toLowerCase();
-      if (newAddress !== currentAddress) {
-        logout();
-      }
-    };
-
-    if (window.ethereum) {
-      window.ethereum.on("accountsChanged", handleAccountsChanged);
-    }
-
-    return () => {
-      window.removeEventListener("goldenhour_session_expired", handleExpired);
-      if (window.ethereum && window.ethereum.removeListener) {
-        window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
-      }
-    };
+    return () => window.removeEventListener("goldenhour_session_expired", handleExpired);
   }, [user]);
 
   return (
     <ErrorBoundary>
       <div className="app">
+        <a className="skip-link" href="#main-content">{t("skipToContent")}</a>
         <header>
           <Link className="brand" to="/">
             <span className="mark">GH</span>
             <div>
-              <strong>GoldenHour</strong>
-              <small>Trusted Emergency History</small>
+              <strong>{t("title")}</strong>
+              <small>{t("tagline")}</small>
             </div>
           </Link>
           <nav>
             {user?.role === "admin" && (
-              <Link to="/admin">🔑 Admin Portal</Link>
+              <Link to="/admin">{t("adminPortal")}</Link>
             )}
             {user?.role === "doctor" && (
-              <Link to="/doctor">🩺 Provider Portal</Link>
+              <Link to="/doctor">{t("providerPortal")}</Link>
             )}
             {user?.role === "patient" && (
               user.patientId ? (
-                <Link to="/patient/me">👤 Patient Portal</Link>
+                <Link to="/patient/me">{t("patientPortal")}</Link>
               ) : (
                 <Link to="/onboarding" style={{ color: "#10b981", fontWeight: "bold" }}>
-                  📝 Complete Onboarding
+                  {t("completeOnboarding")}
                 </Link>
               )
             )}
             {user?.role === "unregistered" && (
               <Link to="/onboarding" style={{ color: "#10b981", fontWeight: "bold" }}>
-                📝 Account Onboarding
+                {t("accountOnboarding")}
               </Link>
             )}
-            <Link to="/emergency">🚨 Emergency Access</Link>
+            <Link to="/emergency">{t("emergencyAccess")}</Link>
           </nav>
-          {user ? (
-            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-              <span className="badge" style={{ textTransform: "uppercase", fontSize: "0.75rem" }}>
-                {user.role}
-              </span>
-              <button className="logout-btn" onClick={logout}>
-                🚪 Disconnect & Logout
-              </button>
-            </div>
-          ) : (
-            <WalletConnectButton onConnected={() => navigate("/login")} />
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <LanguageSelector />
+            {user ? (
+              <>
+                <span className="badge" style={{ textTransform: "uppercase", fontSize: "0.75rem" }}>
+                  {user.role}
+                </span>
+                <button className="logout-btn" onClick={logout}>
+                  {t("signOut")}
+                </button>
+              </>
+            ) : (
+              <Link className="primary" to="/login">{t("signIn")}</Link>
+            )}
+          </div>
         </header>
 
-        <main>
-          <Suspense fallback={<p role="status">Loading your workspace…</p>}>
-          <Routes>
-            <Route path="/" element={<Home user={user} />} />
-            <Route
-              path="/login"
-              element={
-                user ? (
-                  <Navigate
-                    to={
-                      user.role === "admin"
-                        ? "/admin"
-                        : user.role === "doctor"
-                        ? "/doctor"
-                        : user.patientId
-                        ? "/patient/me"
-                        : "/onboarding"
-                    }
-                    replace
-                  />
-                ) : (
-                  <Login onLogin={login} />
-                )
-              }
-            />
-            <Route
-              path="/onboarding"
-              element={user ? <PatientOnboarding onComplete={complete} /> : <Navigate to="/login" />}
-            />
-            <Route path="/patient/:id" element={<PatientRoute user={user} />} />
-            <Route path="/doctor" element={<DoctorRoute user={user} />} />
-            <Route path="/admin" element={<AdminRoute user={user} />} />
-            <Route path="/emergency" element={<EmergencyRoute />} />
-            <Route path="/emergency/:id" element={<EmergencyRoute />} />
-          </Routes>
+        {sessionNotice && <p role="alert">{sessionNotice}</p>}
+        <main id="main-content" tabIndex="-1">
+          <Suspense fallback={<p role="status">{t("loadingWorkspace")}</p>}>
+            <Routes>
+              <Route path="/offline" element={<OfflineCard />} />
+              <Route path="/support" element={<Support />} />
+              <Route path="/" element={<Home user={user} />} />
+              <Route
+                path="/login"
+                element={
+                  user ? (
+                    <Navigate
+                      to={
+                        user.role === "admin"
+                          ? "/admin"
+                          : user.role === "doctor"
+                          ? "/doctor"
+                          : user.patientId
+                          ? "/patient/me"
+                          : "/onboarding"
+                      }
+                      replace
+                    />
+                  ) : (
+                    <Login onLogin={login} />
+                  )
+                }
+              />
+              <Route
+                path="/onboarding"
+                element={user ? <PatientOnboarding onComplete={complete} /> : <Navigate to="/login" />}
+              />
+              <Route path="/patient/:id" element={<PatientRoute user={user} />} />
+              <Route path="/doctor" element={<DoctorRoute user={user} />} />
+              <Route path="/admin" element={<AdminRoute user={user} />} />
+              <Route path="/emergency" element={<EmergencyRoute />} />
+              <Route path="/emergency/:id" element={<EmergencyRoute />} />
+            </Routes>
           </Suspense>
         </main>
 
         <footer>
-          <span>GoldenHour</span>
-          <span>Wallet Verification • AES-256-GCM Encryption • Authenticated API</span>
+          <span>GoldenHour · <Link to="/offline">{t("savedQRCard")}</Link> · <Link to="/support">{t("supportAndStatus")}</Link></span>
+          <span>{t("patientPrivacy")}</span>
         </footer>
       </div>
     </ErrorBoundary>
+  );
+}
+
+export default function App() {
+  return (
+    <I18nProvider>
+      <AppContent />
+    </I18nProvider>
   );
 }

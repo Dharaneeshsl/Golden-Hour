@@ -1,3 +1,6 @@
+const {pagination,pageResponse,memoryPage} = require("../utils/pagination");
+const {ownsPatient} = require("../utils/identity");
+const {auditDisclosure} = require("../services/disclosureAudit");
 const crypto = require("crypto");
 const { canonicalizeWallet } = require("../config/db");
 const { asyncHandler } = require("../utils/asyncHandler");
@@ -23,7 +26,7 @@ function createPatientController({ store, chain, auditChain }) {
     }
     const patientWallet = canonicalizeWallet(patient.wallet);
     const reqWallet = canonicalizeWallet(req.user.wallet);
-    if (patientWallet !== reqWallet) {
+    if (!ownsPatient(patient,req.user)) {
       res.status(403).json({ error: "Patient data access denied" });
       return null;
     }
@@ -61,6 +64,7 @@ function createPatientController({ store, chain, auditChain }) {
         const patient = await store.addPatient({
           id: crypto.randomUUID(),
           wallet,
+          userId:req.user.userId,
           profile,
           critical,
           createdAt: new Date().toISOString(),
@@ -86,7 +90,7 @@ function createPatientController({ store, chain, auditChain }) {
 
         res.status(201).json({ ...patient, chainPatientId });
       } catch (e) {
-        console.error("Patient creation error:", e);
+        console.error("Patient creation error:", {name:e.name, code:e.code || "INTERNAL_ERROR"});
         res.status(502).json({ error: "Patient registration failed" });
       }
     }),
@@ -95,11 +99,12 @@ function createPatientController({ store, chain, auditChain }) {
       const wallet = canonicalizeWallet(req.user.wallet);
       const patient = await store.patientByWallet(wallet);
       if (!patient) return res.status(404).json({ error: "Patient profile not found" });
+      await auditDisclosure(store,auditChain,{patientId:patient.id,actor:req.user.wallet,action:"PATIENT_PROFILE_VIEWED",metadata:{scope:"profile-and-critical"}});
       res.json({
         ...patient,
         patientId: patient.id,
-        records: await store.recordsForPatient(patient.id),
-        audit: await store.auditForPatient(patient.id),
+        records: store.listRecordsPage ? (await store.listRecordsPage(patient.id,{limit:50,offset:0})).slice(0,50) : (await store.recordsForPatient(patient.id)).slice(0,50),
+        audit: store.listAuditPage ? (await store.listAuditPage(patient.id,{limit:50,offset:0})).slice(0,50) : (await store.auditForPatient(patient.id)).slice(0,50),
       });
     }),
 
@@ -145,7 +150,7 @@ function createPatientController({ store, chain, auditChain }) {
 
         res.json(updated);
       } catch (e) {
-        console.error("Patient update error:", e);
+        console.error("Patient update error:", {name:e.name, code:e.code || "INTERNAL_ERROR"});
         res.status(500).json({ error: "Failed to update patient profile" });
       }
     }),
@@ -164,18 +169,19 @@ function createPatientController({ store, chain, auditChain }) {
           wallet: patient.wallet,
           createdAt: patient.createdAt,
           records: [],
-          audit: await store.auditForPatient(patient.id),
+          audit: store.listAuditPage ? (await store.listAuditPage(patient.id,{limit:50,offset:0})).slice(0,50) : (await store.auditForPatient(patient.id)).slice(0,50),
         });
       }
 
-      if (patientWallet !== reqWallet) {
+      if (!ownsPatient(patient,req.user)) {
         return res.status(403).json({ error: "Patient data access denied" });
       }
 
+      await auditDisclosure(store,auditChain,{patientId:patient.id,actor:req.user.wallet,action:"PATIENT_PROFILE_VIEWED",metadata:{scope:"profile-and-critical"}});
       res.json({
         ...patient,
-        records: await store.recordsForPatient(patient.id),
-        audit: await store.auditForPatient(patient.id),
+        records: store.listRecordsPage ? (await store.listRecordsPage(patient.id,{limit:50,offset:0})).slice(0,50) : (await store.recordsForPatient(patient.id)).slice(0,50),
+        audit: store.listAuditPage ? (await store.listAuditPage(patient.id,{limit:50,offset:0})).slice(0,50) : (await store.auditForPatient(patient.id)).slice(0,50),
       });
     }),
 
@@ -183,18 +189,14 @@ function createPatientController({ store, chain, auditChain }) {
       if (req.user.role !== "admin") {
         return res.status(403).json({ error: "Admin authorization required" });
       }
-      const limit = parseInt(req.query.limit, 10) || 50;
-      const offset = parseInt(req.query.offset, 10) || 0;
-      const patients = await store.allPatients();
-      
-      // B5: Redact clinical PHI from bulk administration listing
-      const sanitized = patients.slice(offset, offset + limit).map((p) => ({
-        id: p.id,
-        wallet: p.wallet,
-        createdAt: p.createdAt,
-        hasCriticalData: !!(p.critical && Object.keys(p.critical).length > 0),
+      const page = pagination(req.query);
+      const rows = store.listPatientsPage ? await store.listPatientsPage(page) : memoryPage(await store.allPatients(),page);
+      const sanitized = rows.map(patient=>({
+        id:patient.id,wallet:patient.wallet,createdAt:patient.createdAt,
+        hasCriticalData:patient.hasCriticalData ?? Boolean(patient.critical && Object.keys(patient.critical).length)
       }));
-      res.json(sanitized);
+      return pageResponse(res,sanitized,page);
+
     }),
   };
 }

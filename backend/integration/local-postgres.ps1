@@ -8,7 +8,7 @@ $oldPassword = $env:PGPASSWORD
 Push-Location (Join-Path $PSScriptRoot '..')
 try {
     Set-Content -LiteralPath $pw -Value $secret -Encoding ascii
-    & (Join-Path $PostgresBin 'initdb.exe') -D $cluster -U gh_test -A scram-sha-256 "--pwfile=$pw"
+    & (Join-Path $PostgresBin 'initdb.exe') -D $cluster -U gh_test -A scram-sha-256 --encoding=UTF8 "--pwfile=$pw"
     if ($LASTEXITCODE) { throw "Database initialization failed" }
     & (Join-Path $PostgresBin 'pg_ctl.exe') -D $cluster -l "$cluster/test.log" -o "-h 127.0.0.1 -p 55439" -w start
     if ($LASTEXITCODE) { throw "Temporary database startup failed" }
@@ -17,12 +17,15 @@ try {
         node src/config/migrate.js
         if ($LASTEXITCODE) { throw "Migration failed" }
         $env:RESTORE_TEST_KEY = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($secret))
-        node --test integration/postgres-login.js
+        node --test --test-concurrency=1 integration/postgres-login.js integration/reliability.test.js integration/key-rotation.test.js
         if ($LASTEXITCODE) { throw "Database regression failed" }
         if ($Browser) {
             node integration/browser.js
             if ($LASTEXITCODE) { throw "Browser workflow failed" }
         }
+        $env:RESTORE_EXPECTED_FILE = Join-Path $cluster "restore-manifest.json"
+        node integration/verify-restored.js --snapshot
+        if ($LASTEXITCODE) { throw "Restore source manifest failed" }
         $env:PGPASSWORD = $secret
         $dump = Join-Path $cluster "restore-check.dump"
         & (Join-Path $PostgresBin 'pg_dump.exe') -h 127.0.0.1 -p 55439 -U gh_test -d postgres -Fc -f $dump
@@ -40,6 +43,7 @@ try {
 } finally {
     $env:DATABASE_URL = $oldUrl
     $env:PGPASSWORD = $oldPassword
+    Remove-Item Env:RESTORE_EXPECTED_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:RESTORE_TEST_KEY -ErrorAction SilentlyContinue
     Pop-Location
     Remove-Item -LiteralPath $pw -ErrorAction SilentlyContinue

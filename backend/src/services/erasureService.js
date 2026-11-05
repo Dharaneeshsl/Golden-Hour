@@ -13,8 +13,17 @@ async function assertErasureLedgerApplied(store, ledger) {
 }
 
 async function applyReceipt(tx, receipt) {
-  const patient = (await tx.query("SELECT wallet FROM patients WHERE id=$1 FOR UPDATE",[receipt.patient_id])).rows[0];
+  const patient = (await tx.query("SELECT id,wallet FROM patients WHERE id=$1 FOR UPDATE",[receipt.patient_id])).rows[0];
   if (patient) {
+    await require("./erasureReplayCopies").eraseReplayCopies(tx,patient);
+    await tx.query("DELETE FROM outbox WHERE payload->>'patientId'=$1 OR payload->>'patient_id'=$1",[receipt.patient_id]);
+    await tx.query("DELETE FROM break_glass_events WHERE patient_id=$1",[receipt.patient_id]);
+    await tx.query("DELETE FROM consents_v2 WHERE patient_id=$1",[receipt.patient_id]);
+    await tx.query("DELETE FROM qr_tokens WHERE patient_id=$1",[receipt.patient_id]);
+    const externalFiles=await tx.query("SELECT 1 FROM files f WHERE patient_id=$1 AND NOT EXISTS (SELECT 1 FROM encrypted_objects o WHERE o.id::text=f.object_key) LIMIT 1",[receipt.patient_id]);
+    if(externalFiles.rowCount)throw new Error("External file cleanup must be completed before erasure replay");
+    await tx.query("DELETE FROM encrypted_objects WHERE id::text IN (SELECT object_key FROM files WHERE patient_id=$1)",[receipt.patient_id]);
+    await tx.query("DELETE FROM files WHERE patient_id=$1",[receipt.patient_id]);
     await tx.query("UPDATE sessions SET revoked_at=now() WHERE wallet=$1",[patient.wallet]);
     await tx.query("DELETE FROM encrypted_objects WHERE id::text IN (SELECT ipfs_cid FROM records WHERE patient_id=$1)",[receipt.patient_id]);
     await tx.query("UPDATE key_registry SET encrypted_dek='[CRYPTO_SHREDDED_PERMANENTLY_DESTROYED]',status='shredded',rotated_at=now() WHERE patient_id=$1",[receipt.patient_id]);

@@ -1,43 +1,26 @@
+import { API_URL } from "../config/runtime";
 const SESSION_PREFIX = "goldenhour_";
-const DISCONNECTED_FLAG = "goldenhour_wallet_disconnected";
-
 function removePrefixedKeys(storage) {
-  if (!storage) return;
   const keys = [];
-  for (let i = 0; i < storage.length; i += 1) {
-    const key = storage.key(i);
-    if (key && key.startsWith(SESSION_PREFIX)) keys.push(key);
+  for (let index=0;index<storage.length;index++) {
+    const key=storage.key(index);
+    if (key?.startsWith(SESSION_PREFIX)) keys.push(key);
   }
-  keys.forEach((key) => storage.removeItem(key));
+  keys.forEach(key=>storage.removeItem(key));
 }
-
 export function clearBrowserSession() {
   removePrefixedKeys(window.localStorage);
   removePrefixedKeys(window.sessionStorage);
-  window.localStorage.setItem(DISCONNECTED_FLAG, "true");
+  window.localStorage.setItem("goldenhour_signed_out","true");
 }
-
-export async function disconnectWalletProvider() {
-  if (!window.ethereum?.request) return;
-  try {
-    await window.ethereum.request({
-      method: "wallet_revokePermissions",
-      params: [{ eth_accounts: {} }],
-    });
-  } catch {
-    // Some wallets do not support revoke; local session is still cleared.
-  }
+export function markAuthenticated() {
+  window.localStorage.removeItem("goldenhour_signed_out");
+  window.localStorage.removeItem("goldenhour_token");
+  window.localStorage.setItem("goldenhour_authenticated","true");
 }
-
 export async function fullLogoutCleanup() {
-  clearBrowserSession();
-  await disconnectWalletProvider();
-}
-
-export function isWalletDisconnected() {
-  return window.localStorage.getItem(DISCONNECTED_FLAG) === "true";
-}
-
-export function markWalletConnected() {
-  window.localStorage.removeItem(DISCONNECTED_FLAG);
+  try {
+    const response=await fetch(API_URL+"/api/auth/logout",{method:"POST",credentials:"include"});
+    if (!response.ok) throw new Error("Sign-out could not be confirmed. Close this browser on a shared device.");
+  } finally {clearBrowserSession();}
 }

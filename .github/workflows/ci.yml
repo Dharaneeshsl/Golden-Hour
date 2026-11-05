@@ -10,15 +10,6 @@ concurrency:
   group: goldenhour-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  contracts:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: {node-version: 24, cache: npm}
-      - run: npm ci
-      - run: npm run compile
-      - run: npm test
   backend:
     runs-on: ubuntu-latest
     defaults: {run: {working-directory: backend}}
@@ -30,6 +21,7 @@ jobs:
       - run: node ../scripts/ciSecretScan.js
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run check
+      - run: npm run build
       - run: npm test
   frontend:
     runs-on: ubuntu-latest
@@ -61,7 +53,7 @@ jobs:
         with: {node-version: 24}
       - run: npm ci
       - run: npm run db:migrate
-      - run: node --test integration/postgres-login.js
+      - run: npm run test:postgres
       - run: npm ci --prefix ../frontend
       - run: npm run build --prefix ../frontend
         env:
@@ -70,3 +62,44 @@ jobs:
       - run: node integration/browser.js
         env:
           BROWSER_CHANNEL: chromium
+
+      - run: node ../scripts/pwa-browser.cjs
+        env:
+          BROWSER_CHANNEL: chromium
+  containers:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: ./${{ matrix.component }}
+          load: true
+          tags: goldenhour-ci:${{ matrix.component }}
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: goldenhour-ci:${{ matrix.component }}
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '1'
+  evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 24}
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix frontend
+      - run: npm run verify:code
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: code-verification-evidence
+          path: |
+            STATUS.md
+            artifacts/verification
+          retention-days: 30

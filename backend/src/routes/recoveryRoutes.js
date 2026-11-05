@@ -1,3 +1,5 @@
+const {validatedRouter} = require("../utils/validatedRouter");
+const {validPhone,subjectId} = require("../services/phoneAuthService");
 const express = require("express");
 const crypto = require("crypto");
 const {ethers} = require("ethers");
@@ -8,14 +10,18 @@ const {AuditChainService} = require("../services/auditChainService");
 const {asyncHandler} = require("../utils/asyncHandler");
 
 module.exports = ({store}) => {
-  const router = express.Router();
+  const router = validatedRouter();
   router.use(requireAuth);
   router.post("/",asyncHandler(async (req,res) => {
-    const {oldWallet,proofReference} = req.body || {};
-    if (!ethers.isAddress(oldWallet) || typeof proofReference !== "string" || proofReference.length<10 || proofReference.length>500) {
+    const {oldWallet,oldPhone,proofReference} = req.body || {};
+    if ((!ethers.isAddress(oldWallet) && !subjectId(oldWallet) && !validPhone(oldPhone)) || typeof proofReference !== "string" || proofReference.length<10 || proofReference.length>500) {
       return res.status(400).json({error:"Provide the previous wallet and a hospital identity-verification case reference"});
     }
-    const previous = ethers.getAddress(oldWallet);
+    let previous=subjectId(oldWallet) ? oldWallet : ethers.isAddress(oldWallet) ? ethers.getAddress(oldWallet) : null;
+    if (oldPhone) {
+      const identity=(await store.query("SELECT user_id FROM identities WHERE provider_type='phone_otp' AND identifier=$1",[oldPhone])).rows[0];
+      previous="user:"+(identity?.user_id || crypto.randomUUID());
+    }
     if (previous === req.user.wallet || getAdminWallets().includes(previous) || await store.patientByWallet(req.user.wallet) || await store.providerByWallet(req.user.wallet)) {
       return res.status(409).json({error:"Use a new patient wallet. Administrator and staff accounts require the hospital's account process."});
     }
@@ -52,9 +58,18 @@ module.exports = ({store}) => {
         const patient = await tx.patientByWallet(row.old_wallet);
         if (!patient || await tx.patientByWallet(row.new_wallet) || await tx.providerByWallet(row.new_wallet)) return {status:409,error:"Identity records changed. Investigate before retrying"};
         await tx.query("SELECT id FROM patients WHERE id=$1 FOR UPDATE",[patient.id]);
-        const moved = await tx.query("UPDATE patients SET wallet=$2,revision=revision+1 WHERE id=$1 AND wallet=$3 RETURNING id",[patient.id,row.new_wallet,row.old_wallet]);
+        const oldUserId=patient.userId,newUserId=subjectId(row.new_wallet);
+        let destination=row.new_wallet;
+        if (oldUserId && newUserId) {
+          await tx.query("UPDATE identities SET provider_type='retired_phone',identifier=identifier||'#'||id::text WHERE user_id=$1 AND provider_type='phone_otp'",[oldUserId]);
+          await tx.query("UPDATE identities SET user_id=$2 WHERE user_id=$1 AND provider_type='phone_otp'",[newUserId,oldUserId]);
+          await tx.query("UPDATE users SET status='suspended' WHERE id=$1",[newUserId]);
+          await tx.query("UPDATE sessions SET revoked_at=now() WHERE user_id IN ($1,$2)",[oldUserId,newUserId]);
+          destination="user:"+oldUserId;
+        }
+        const moved = await tx.query("UPDATE patients SET wallet=$2,revision=revision+1 WHERE id=$1 AND wallet=$3 RETURNING id",[patient.id,destination,patient.wallet]);
         if (!moved.rowCount) return {status:409,error:"Identity changed during review. Investigate before retrying"};
-        await tx.query("UPDATE sessions SET revoked_at=now() WHERE wallet=$1",[row.old_wallet]);
+        await tx.query("UPDATE sessions SET revoked_at=now() WHERE wallet IN ($1,$2)",[row.old_wallet,patient.wallet]);
         await tx.query("UPDATE providers SET status='suspended' WHERE lower(wallet)=lower($1)",[row.old_wallet]);
         await tx.query("UPDATE patient_provider_consents SET status='revoked',revoked_at=now() WHERE patient_id=$1",[patient.id]);
         await tx.query("UPDATE audit_logs SET expires_at=now() WHERE patient_id=$1 AND action='EMERGENCY_BREAK_GLASS'",[patient.id]);

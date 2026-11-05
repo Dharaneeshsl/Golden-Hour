@@ -1,3 +1,6 @@
+const {pagination,pageResponse,memoryPage} = require("../utils/pagination");
+const {ownsPatient} = require("../utils/identity");
+const {auditDisclosure} = require("../services/disclosureAudit");
 const crypto = require("crypto");
 const { canonicalizeWallet } = require("../config/db");
 const { asyncHandler } = require("../utils/asyncHandler");
@@ -25,7 +28,7 @@ function createRecordController({ store, encryption, ipfs, chain, auditChain, en
     const patientWallet = canonicalizeWallet(patient.wallet);
 
     // Patient reading their own records
-    if (patientWallet === reqWallet) return true;
+    if (ownsPatient(patient,req.user)) return true;
 
     // B5 Fix: System Admins CANNOT read or decrypt patient PHI clinical records!
     // Removed req.user.role === "admin"
@@ -65,9 +68,7 @@ function createRecordController({ store, encryption, ipfs, chain, auditChain, en
 
       try {
         const recordId = crypto.randomUUID();
-        const encrypted = process.env.NODE_ENV === "production"
-          ? await envelopeEncryption.encryptField(patientId, {value: clinicalData}, {patientId, recordId, version:2})
-          : encryption.encryptJson(clinicalData);
+        const encrypted = await envelopeEncryption.encryptField(patientId, {value: clinicalData}, {patientId, recordId, version:2});
         const stored = await ipfs.uploadEncrypted(encrypted);
 
         const rawHash = crypto
@@ -99,6 +100,7 @@ function createRecordController({ store, encryption, ipfs, chain, auditChain, en
           patientId,
           recordType: recordType.trim(),
           doctorId: provider.wallet,
+          doctorUserId:provider.userId,
           ipfsCid: stored.cid,
           encryptedHash: rawHash,
           createdAt: new Date().toISOString(),
@@ -127,7 +129,7 @@ function createRecordController({ store, encryption, ipfs, chain, auditChain, en
 
         res.status(201).json(record);
       } catch (e) {
-        console.error("Record creation error:", e);
+        console.error("Record creation error:", {name:e.name, code:e.code || "INTERNAL_ERROR"});
         res.status(502).json({ error: "Secure record persistence failed" });
       }
     }),
@@ -142,10 +144,12 @@ function createRecordController({ store, encryption, ipfs, chain, auditChain, en
           .json({ error: "Patient consent required for record access" });
       }
 
-      const limit = parseInt(req.query.limit, 10) || 50;
-      const offset = parseInt(req.query.offset, 10) || 0;
-      const records = await store.recordsForPatient(patient.id);
-      res.json(records.slice(offset, offset + limit));
+      const page = pagination(req.query);
+      const rows = store.listRecordsPage ? await store.listRecordsPage(patient.id,page)
+        : memoryPage(await store.recordsForPatient(patient.id),page);
+      await auditDisclosure(store,auditChain,{patientId:patient.id,actor:req.user.wallet,action:"RECORD_INDEX_VIEWED",metadata:{limit:page.limit,offset:page.offset}});
+      return pageResponse(res,rows,page);
+
     }),
 
     detail: asyncHandler(async (req, res) => {
@@ -180,9 +184,11 @@ function createRecordController({ store, encryption, ipfs, chain, auditChain, en
         const clinicalData = encrypted.version === 2
           ? (await envelopeEncryption.decryptField(patient.id, encrypted)).value
           : encryption.decryptJson(encrypted);
+        await auditDisclosure(store,auditChain,{patientId:patient.id,actor:req.user.wallet,
+          action:"RECORD_VIEWED",recordId:record.id,metadata:{recordId:record.id}});
         res.json({ ...record, clinicalData });
       } catch (e) {
-        console.error("Record detail error:", e);
+        console.error("Record detail error:", {name:e.name, code:e.code || "INTERNAL_ERROR"});
         res.status(502).json({ error: "Secure record retrieval failed" });
       }
     }),

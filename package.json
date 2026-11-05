@@ -7,22 +7,13 @@
     "node": "24.x"
   },
   "scripts": {
-    "compile": "hardhat compile",
-    "test": "hardhat test",
-    "node": "hardhat node",
-    "deploy:local": "hardhat run scripts/deploy.js --network localhost",
-    "deploy:wire": "hardhat run scripts/wireLocalDeployment.js --network localhost",
-    "grant:local": "hardhat run scripts/grantAccess.js --network localhost",
     "backend": "npm --prefix backend run dev",
     "frontend": "npm --prefix frontend run dev",
-    "install:all": "npm install && npm --prefix backend install && npm --prefix frontend install",
+    "test": "npm --prefix backend test && npm --prefix frontend test",
+    "test:postgres": "npm --prefix backend run test:postgres",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build",
     "scan:secrets": "node scripts/ciSecretScan.js",
-    "check": "node scripts/ciSecretScan.js && npm run compile && npm test && npm --prefix backend run check && npm --prefix backend test && npm --prefix frontend run build && npm --prefix frontend test"
+    "verify:code": "node scripts/verify-code.cjs"
   },
-  "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
-    "hardhat": "^2.22.18",
-    "@openzeppelin/contracts": "^5.0.2",
-    "dotenv": "^16.4.5"
-  }
+  "devDependencies": {}
 }

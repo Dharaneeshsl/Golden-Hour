@@ -14,7 +14,7 @@ module.exports = ({store}) => {
     }
     if (!store.query) return res.sendStatus(503);
     // Bound cleanup work so the function can run within the Vercel request deadline.
-    for (const table of ["http_rate_limits","login_challenges","mfa_challenges","staff_invitations"]) {
+    for (const table of ["http_rate_limits","login_challenges","mfa_challenges","phone_login_challenges","staff_invitations","mutation_requests","patient_archive_exports"]) {
       await store.query(`DELETE FROM ${table} WHERE ctid IN (SELECT ctid FROM ${table} WHERE expires_at<now() LIMIT 1000)`);
     }
     const jobs = await new OutboxService(store).processPending();

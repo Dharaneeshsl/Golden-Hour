@@ -1,58 +1,61 @@
-# GoldenHour production engineering checklist
+# GoldenHour engineering delivery
 
-Target the first deployment at one Indian hospital. Include patient enrollment, clinician verification, consent, record retrieval, emergency access and review. Each checkbox is a release criterion. Attach the change, passing test or staging drill and release revision before closing it. Use fictional records until the hospital authorizes live use.
+This release targets one hospital per deployment and isolated database. Hosting, environment values, provider accounts and hospital operating decisions belong to the deployment owner.
 
-## Implementation evidence · 5 November 2026
+## Production status
 
-The changes below passed 39 backend tests, 12 frontend tests and the frontend build. A fresh PostgreSQL 18 cluster ran all nine migrations and four integration tests. CI is configured to repeat database tests on PostgreSQL 16. Production Compose configuration validates. Live HTTPS deployment, provider delivery and live hospital device acceptance remain unverified.
+Code work remains open. See [the remaining code backlog](REMAINING_CODE_WORK.md) for transaction, idempotency, disclosure-audit, validation, static-header and key-rotation blockers. The implemented features below do not constitute full production sign-off.
 
-| Checklist area | Current evidence and remaining work |
+## Implemented code
+
+- [x] Exact expiring wallet challenges shared across replicas with atomic single-use redemption.
+- [x] Wallet-bound server sessions, refresh rotation, logout and live session revocation.
+- [x] Production staff authenticator MFA with encrypted seeds, shared attempt limits, replay rejection and one-use recovery codes.
+- [x] Hospital-issued staff invitations, provider approval and suspension.
+- [x] Patient recovery requiring two different administrators, with revocation of prior sessions, cards and grants.
+- [x] Private encrypted clinical records, patient-key wrapping, record binding and persistent key registry.
+- [x] Vault adapter with startup round-trip check, outage handling, token renewal through a file, and an operator key-rewrap tool.
+- [x] Resumable, integrity-checked legacy private-copy migration tool.
+- [x] Replaceable hashed QR tokens and explicit clinician identity-match confirmation.
+- [x] Time-limited emergency reads, shared emergency quotas and transactional grant/audit/review writes.
+- [x] Independent emergency review and administrator incident controls.
+- [x] Canonical hash-chained audit records, database immutability trigger and serialized production appends.
+- [x] Summary revision conflicts, field source/author/time metadata and explicit unknown values.
+- [x] Sensitive-screen expiry and clearing after denied record access.
+- [x] Patient-only paginated archive export, patient data requests, hospital resolutions and retention holds.
+- [x] Operator clinical erasure with retention checks and an independent append-only ledger.
+- [x] Privacy gate that blocks API traffic after restoring a database with unapplied erasure receipts.
+- [x] Durable job claims, leases, stale-worker rejection, bounded retries and reconciliation before manual replay.
+- [x] Authenticated scheduled maintenance for Vercel and a background-job dashboard.
+- [x] Vercel serverless entrypoint, same-origin frontend, warm database reuse and shared PostgreSQL HTTP limits.
+- [x] Verified database TLS, environment-based CA support, readiness checks and separate runtime/migration grants.
+- [x] Redacted request timing/error logs, administrator queue metrics and graceful container shutdown.
+- [x] Locked dependencies, dependency audit checks, secret scan and CI database/browser workflows.
+- [x] Browser route splitting for smaller initial downloads.
+- [x] Repeatable real-PostgreSQL workflow tests, browser acceptance fixture, local concurrency benchmark and encrypted backup restore.
+
+## Verification evidence
+
+The local verification runs on Node 24 and PostgreSQL 18. CI is configured for PostgreSQL 16 and Chromium.
+
+| Check | Evidence |
 | --- | --- |
-| Wallet authentication | Exact expiring shared challenge, atomic redemption, wallet-bound sessions, atomic refresh rotation and verified logout. Two API instances tested. Shared PostgreSQL HTTP throttles and production staff TOTP MFA implemented. Browser enrollment and one-use recovery-code login verified. |
-| Production database | Full migration runner in PostgreSQL CI job and local disposable cluster. Runtime role rejects schema changes and audit mutation. Populated-release upgrade and restore evidence remain open. |
-| Notifications | Missing handlers and unconfirmed SMS fail delivery processing. Emergency SMS dispatch disabled. Provider approval, callbacks and preferences remain open. |
-| Deployment | Private verified-TLS DB settings, separate migration/runtime credentials, HTTPS gateway and same-origin frontend configuration. Compose validates. Image pinning, deployment smoke test and rollback remain open. |
-| Hospital boundaries | Deployment uses one isolated database per hospital. Existing ownership checks exercised. Shared multi-hospital service remains outside the deployment design. |
-| Emergency access | Transaction commits grant, audit event and review entry. Shared DB quota, expiry and clinician status checks. Review UI and duplicate-review protection. Clinical criteria and incident drills remain open. |
-| Cards | Random replacement tokens stored as hashes. Scanned token stays in URL fragment. Patient can print and replace card. Rotation tested through API. Hospital identity-matching procedure and device scan drill remain open. |
-| Encryption | Production record payloads use patient keys with record binding. Private encrypted objects persist in PostgreSQL. Canonical authenticated data survives JSONB storage. Key generation serialized in production. Vault Transit adapter and key-rewrap operator tool added. Live KMS authorization, rotation and recovery verification remain open. |
-| Existing records | Operator-run integrity-checked private-copy migration added. Syntax checked. Execution against a restored legacy database and old audit remediation remain open. |
-| Summary | Revision conflict protection, patient-reported source, update time, unknown-value display and emergency screen expiry implemented. Clinical validation and field-level provenance remain open. |
-| Account operations | Verified sessions, refresh replay protection and live revocation implemented. Authenticator enrollment and one-use recovery codes implemented. Staff invitations and lost-wallet recovery remain open. |
-| Operations | Redacted request metrics logs, no-store responses, latest-schema readiness and least-privilege grants added. Local backup restore and decryption passed. Built-frontend Chrome workflow passed, including mobile patient enrollment and staff MFA. Twenty-five concurrent local synthetic emergency reads passed at approximately 200 ms p95 with zero errors. Monitoring and production acceptance remain open. |
+| Backend unit/API regressions | 39 tests passing |
+| PostgreSQL integration | Seven tests covering replica login, MFA, invitations, patient recovery, clinical reads, export, runtime permissions, shared throttles, job leases and erasure replay |
+| Frontend regressions | 12 tests passing |
+| Browser workflow | Built frontend in Chrome, real PostgreSQL, mobile-size patient view, real wallet signatures from a browser-only signing fixture |
+| Backup recovery | Database exported, restored into a second database, synthetic encrypted clinical record decrypted |
+| Local concurrency | 25 simultaneous critical reads, zero errors and approximately 200 ms p95, with audit-chain verification |
+| Contracts | Six existing contract tests passing |
+| Security tooling | Backend and frontend dependency audits report zero known vulnerabilities, secret scan passes |
+| Build | Frontend production build passes |
 
-All checklist items retain their release-gate status below because each covers additional operational acceptance criteria.
+SMS delivery and public chain writes are disabled in the hospital release. The background worker rejects missing handlers and unconfirmed deliveries. Connecting an SMS service requires a tested adapter and the hospital's approved sender/template setup.
 
-## Vercel delivery
+The private-copy migration and Vault rewrap tools are operator tools. The private migration now upgrades legacy ciphertext to patient-bound envelopes and passes a repeat-run test. Live migration and rotation against an existing production dataset require deployment-specific verification.
 
-A serverless entrypoint, production same-origin frontend, shared database throttles, environment-based database CA and Vault token support are implemented. See VERCEL_DEPLOYMENT.md for configuration and deployment checks. Both backend and frontend dependency audits report zero known advisories after patches. Patient-only full record archive export is implemented and included in the real-database tests.
+## Deployment-owner release checks
 
-## P0 · First engineering sprint
+Follow VERCEL_DEPLOYMENT.md and ERASURE_OPERATIONS.md. Supply environment values, create isolated databases and roles, apply every migration, configure managed keys and the independent erasure ledger, and run the synthetic workflow on the deployed hostname.
 
-- [ ] **Fix wallet verification across servers.** In `backend/src/routes/authRoutes.js`, the server accepts client text containing the nonce and stores challenges in a process-local Map. Make the frontend sign the exact server-issued message. Bind domain, URI, chain, wallet and expiry, verify the signature, then atomically consume the challenge in shared storage before issuing a session. Test altered domain and text, expiry, concurrent replay and login starting on replica A and finishing on B. Exactly one concurrent submission may succeed.
-- [ ] **Run the production database in CI.** The test named `backend/test/postgresIntegration.test.js` uses pg-mem and explicitly lists migrations through 004. Add PostgreSQL 16 to `.github/workflows/ci.yml`, run the actual migration runner with every migration and run API integration tests against it. Exercise upgrades from a previous populated release, simultaneous writes, audit triggers under the runtime role and service restart. Fail CI if these checks skip.
-- [ ] **Fix false delivery reports.** In `outboxService.js` a missing handler can still complete a job. In `notificationService.js` an SMS can resolve as LOGGED_ONLY. Reject unknown topics, persist queued/accepted/delivered/failed states, and display the recorded state. If SMS is in launch scope, use an approved sender and template for the pilot, signed provider callbacks and verified recipient preferences. Otherwise disable the promise in the UI. Test provider outage, duplicate callbacks and an absent handler.
-- [ ] **Make deployment configuration safe.** Replace the fixed database password, published database port, plaintext connection and localhost API origin in the production deployment derived from `docker-compose.yml`. Configure HTTPS, verified DB TLS, private networking and separate migration/runtime database roles. Validate secrets, origins, auth domain and selected storage backend at startup without logging their values. Smoke-test the built frontend from a second device and prove unsafe config stops startup.
-
-## P0 · Before handling a real record
-
-- [ ] **Enforce hospital and patient boundaries.** Trace every list, lookup, export and write in the routers through `backend/src/config/db.js`. Derive staff membership from authenticated server state. Add scoped keys and queries or enforce a separate deployment/database per hospital. Test two facilities, two patients, guessed identifiers, a suspended clinician and a revoked grant on an already-open screen. Check response bodies as well as status codes.
-- [ ] **Make emergency access one auditable operation.** In the emergency controller, commit the authorization decision, expiring session, review entry and notification job in one database transaction. Enforce expiry, provider status and permitted fields on every read. Test a failure between each write, duplicate submission and review by a different authorized user. A failed required audit write must prevent disclosure.
-- [ ] **Protect the emergency card.** `QRCodeCard.jsx` embeds the patient ID in the URL. Issue random replaceable card identifiers, store their hashes and expose no patient details before authorization. Remove identifiers from access logs, analytics and referrers. Test a photographed card, replacement, old printed cards and scanning after sign-in. Require a hospital-approved identity check before showing the summary.
-- [ ] **Finish private storage and key migration.** Follow writes and reads through `ipfsService.js`, both encryption services and the record controller. Use private objects with least-privilege access, a managed key service and versioned wrapped keys. Migrate existing ciphertext with resumable checkpoints and verify decryptability before switching readers. Exercise rotation, tampered content, interrupted migration and key-service outage. Disable public chain writes for the pilot unless the exact outgoing payload has been reviewed for linkable metadata.
-- [ ] **Implement the patient data lifecycle.** Inventory database rows, objects, notifications, caches, audit entries and backups. Implement authenticated correction, export and policy-driven deletion with receipts and retryable work. Have the hospital specify retention exceptions. Verify a restored backup reapplies deletion decisions before serving traffic.
-- [ ] **Make the clinical summary safe to interpret.** Add field provenance, author, last review time and explicit unknown values from database schema through API to emergency view. Prevent silent overwrites during concurrent edits. Clear sensitive screens on logout, expiry and account change. Test stale, conflicting, empty and partially entered data with the hospital's clinical lead.
-- [ ] **Complete account operations.** Implement staff invitation, verified enrollment, privileged MFA, prompt offboarding and audited patient account recovery. Bind recovery to the existing patient without creating a duplicate or transferring records on an unverified request. Test a lost phone, shared workstation, departed staff member and attempted recovery by an impostor.
-
-## P1 · Before opening the production endpoint
-
-- [ ] **Run durable background workers.** Claim jobs with leases, retry with bounded backoff, deduplicate external actions and expose permanently failed jobs for replay. Test two workers and a crash after provider acceptance but before acknowledgement. Reconcile ambiguous deliveries with the provider before resending.
-- [ ] **Ship repeatable releases.** Build pinned images from lockfiles, scan dependencies, images and secrets, deploy the same image digest to staging and production, and serialize migrations. Separate liveness from readiness and drain in-flight requests on shutdown. Rehearse an application rollback with the upgraded schema.
-- [ ] **Make failures visible and recoverable.** Add redacted request IDs, latency/error metrics, database saturation, queue age, delivery failures and unusual emergency-access counts. Assign an alert owner. Define acceptable downtime and data loss with the hospital. Restore database, files and key access into an isolated environment, time the recovery and decrypt a fictional record. Verify logs contain no medical payloads or credentials.
-- [ ] **Test the whole product as shipped.** Add browser tests against built containers and real PostgreSQL for enrollment → consent → clinician read → revocation, and QR scan → emergency access → expiry → review. Run on a shared desktop and a low-end Android device with slow or interrupted connectivity. Verify local-language critical instructions with pilot staff and provide a visible fallback when retrieval fails.
-- [ ] **Measure launch capacity.** Agree peak simultaneous scans, response-time and error thresholds with the hospital. Load-test the entire scan-to-summary path, including a shift change and a slow dependency. Record p95 latency, failures and recovery time. Block the release on any wrong-patient response or unauthorized disclosure.
-- [ ] **Exercise incident response and release controls.** Demonstrate disabling a compromised clinician, a leaked card, an SMS integration and emergency access independently. Commission independent security testing of the deployed configuration. Close critical/high findings and repeat affected tests. Record who can pause enrollment and roll back around the clock.
-
-## Release decision
-
-Keep a release record with commit and image digest, migration version, CI run, end-to-end and load results, restore timing, security findings, named operator and hospital sign-off. Mark each shipped workflow enabled or disabled. Require all applicable P0 and P1 items before live use. Expansion to a shared multi-hospital service requires a separate isolation test and approval. Add billing automation, ABDM integration or public audit anchoring when a signed customer requirement defines the workflow and its acceptance test.
+Record live Vercel routing/TLS results, actual wallet-extension/device results, restore timing, provider behavior, alert routing and rollback evidence. Agree hospital capacity targets and repeat the benchmark on that infrastructure. Obtain independent security findings and clinical workflow acceptance before enrolling live patients. These operating results cannot be inferred from local tests.

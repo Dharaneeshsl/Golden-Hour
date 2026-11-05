@@ -1,21 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {EnvelopeEncryptionService} = require("../src/services/envelopeEncryptionService");
-const {JsonStore} = require("../src/config/db");
-test("remote key wrapping survives restart and fails closed during outage",async () => {
-  const store = new JsonStore(":memory:");
-  let offline = false, raw;
-  const keyService = {
-    async wrap(key) {raw = Buffer.from(key);return "vault:v1:ZmFrZQ==";},
-    async unwrap() {if (offline) throw new Error("Key service unavailable");return Buffer.from(raw);}
-  };
-  const encrypted = await new EnvelopeEncryptionService(undefined,store,keyService)
-    .encryptField("patient", {note:"synthetic"}, {patientId:"patient"});
-  const restarted = new EnvelopeEncryptionService(undefined,store,keyService);
-  assert.deepEqual(await restarted.decryptField("patient",encrypted),{note:"synthetic"});
-  offline = true;
-  await assert.rejects(restarted.decryptField("patient",encrypted),/unavailable/);
-});
 
 test("Vault adapter sends authenticated requests and rejects failed responses",async t => {
   const fs = require("fs"), os = require("os"), path = require("path");

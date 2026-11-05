@@ -80,7 +80,7 @@ export default function PatientOnboarding({ onComplete }) {
         <p className="eyebrow">Account Onboarding & Role Selection</p>
         <h2>Welcome to GoldenHour</h2>
         <p className="muted">
-          Your wallet address is connected. Please select your account role to complete registration.
+          Your phone number is verified. Please select your account role to complete registration.
         </p>
 
         <div className="admin-tabs" style={{ marginBottom: "1.5rem" }}>
@@ -202,11 +202,11 @@ export default function PatientOnboarding({ onComplete }) {
           <p>Use this after your hospital opens an identity-verification case. Two different administrators must approve the recovery. Enter the case reference only.</p>
           <form onSubmit={async event => {
             event.preventDefault(); setBusy(true);setError("");
-            try {setRecoveryReceipt(await api.requestRecovery({oldWallet,proofReference}));}
+            try {setRecoveryReceipt(await api.requestRecovery({oldPhone:oldWallet,proofReference}));}
             catch (err) {setError(err.message);}
             finally {setBusy(false);}
           }}>
-            <label>Previous wallet address<input value={oldWallet} onChange={e => setOldWallet(e.target.value)} required /></label>
+            <label>Previous mobile number (+91…)<input value={oldWallet} onChange={e => setOldWallet(e.target.value)} required /></label>
             <label>Hospital verification case reference<input value={proofReference} onChange={e => setProofReference(e.target.value)} required /></label>
             <button disabled={busy}>Request profile recovery</button>
           </form>

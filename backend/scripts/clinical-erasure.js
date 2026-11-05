@@ -1,6 +1,6 @@
 const {Pool} = require("pg");
 const {PostgresStore} = require("../src/config/db");
-const {getDbSslConfig} = require("../src/config/migrate");
+const {databaseOptions} = require("../src/config/migrate");
 const {erasePatient,replayLedger} = require("../src/services/erasureService");
 
 async function main() {
@@ -9,8 +9,8 @@ async function main() {
   if (!url || !process.env.DATABASE_URL) throw new Error("Operator database and ledger credentials required");
   const primary = new URL(process.env.DATABASE_URL), external = new URL(url);
   if (primary.host===external.host && primary.pathname===external.pathname) throw new Error("Use an independent ledger database");
-  const pool = new Pool({connectionString:primary.href,ssl:getDbSslConfig()});
-  const ledger = new Pool({connectionString:external.href,ssl:getDbSslConfig()});
+  const pool = new Pool(databaseOptions(primary.href));
+  const ledger = new Pool(databaseOptions(external.href));
   try {
     const store = new PostgresStore(pool);
     if (process.argv.includes("--replay")) console.info("Applied erasure receipts:",await replayLedger(store,ledger));
