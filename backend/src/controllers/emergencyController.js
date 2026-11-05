@@ -1,6 +1,6 @@
 const crypto = require("crypto");
-const { notificationService } = require("../services/notificationService");
 const { canonicalizeWallet } = require("../config/db");
+const { AuditChainService } = require("../services/auditChainService");
 const { asyncHandler } = require("../utils/asyncHandler");
 
 // In-memory provider break-glass rate limiting cache: providerWallet -> [timestamps]
@@ -27,11 +27,15 @@ function createEmergencyController({ store, chain, envelopeEncryption, auditChai
 
   return {
     create: asyncHandler(async (req, res) => {
-      const { patientId, justification, reasonCode, facility } = req.body || {};
+      const { cardToken, justification, reasonCode, facility } = req.body || {};
+      const patientId = cardToken !== undefined
+        ? (typeof cardToken === "string" && /^[a-f0-9]{64}$/.test(cardToken)
+          ? await store.cardPatient(crypto.createHash("sha256").update(cardToken).digest("hex")) : null)
+        : req.body?.patientId;
       const patient = await store.patientById(patientId);
       if (!patient) return res.status(404).json({ error: "Patient not found" });
 
-      if (!justification || justification.trim().length < 10) {
+      if (typeof justification !== "string" || justification.trim().length < 10) {
         return res
           .status(400)
           .json({ error: "A detailed justification of at least 10 characters is required" });
@@ -43,7 +47,8 @@ function createEmergencyController({ store, chain, envelopeEncryption, auditChai
 
       const providerWallet = canonicalizeWallet(req.provider.wallet);
       // B7: Enforce provider rate limits on break-glass requests
-      if (!checkProviderRateLimit(providerWallet)) {
+      const withinQuota = store.emergencyQuota ? await store.emergencyQuota(providerWallet, MAX_ATTEMPTS_PER_WINDOW) : checkProviderRateLimit(providerWallet);
+      if (!withinQuota) {
         return res.status(429).json({
           error: "Break-glass rate limit exceeded. Maximum 5 emergency requests per 15 minutes.",
         });
@@ -76,58 +81,54 @@ function createEmergencyController({ store, chain, envelopeEncryption, auditChai
           );
         }
 
-        const event = await store.addAudit({
-          id: crypto.randomUUID(),
-          patientId,
-          actor: providerWallet,
-          action: "EMERGENCY_BREAK_GLASS",
-          providerId: req.provider.id,
-          metadata: {
-            scope: "CRITICAL_ONLY",
-            justification: justification.trim(),
-            encryptedJustification,
-            reasonCode: clinicalReason,
-            facility: hospitalFacility,
-          },
-          expiresAt,
-          timestamp: new Date().toISOString(),
-        });
-
-        // Persist to tamper-evident hash-chained audit log (Step 4 Audit)
-        if (auditChain && auditChain.appendAuditEvent) {
-          await auditChain.appendAuditEvent({
-            id: event.id,
-            patientId: patient.id,
+        const persist = async (eventStore, eventAudit) => {
+          const event = await eventStore.addAudit({
+            id: crypto.randomUUID(),
+            patientId,
             actor: providerWallet,
             action: "EMERGENCY_BREAK_GLASS",
-            details: { reasonCode: clinicalReason, facility: hospitalFacility, scope: "CRITICAL_ONLY" },
-            timestamp: event.timestamp,
-          });
-        }
-
-        // Record break-glass event in break_glass_events for institutional review
-        if (store.addBreakGlassEvent) {
-          await store.addBreakGlassEvent({
-            id: event.id,
-            patientId: patient.id,
-            doctorId: req.provider.id,
-            reasonCode: clinicalReason,
-            justification: justification.trim(),
-            facility: hospitalFacility,
+            providerId: req.provider.id,
+            metadata: {
+              scope: "CRITICAL_ONLY",
+              encryptedJustification,
+              reasonCode: clinicalReason,
+              facility: hospitalFacility,
+            },
             expiresAt,
-            createdAt: event.timestamp,
+            timestamp: new Date().toISOString(),
           });
-        }
 
-        // Dispatch instant SMS alert
-        notificationService.sendEmergencyAlert({
-          patientId,
-          patientPhone: patient.profile && patient.profile.phone,
-          emergencyContact: patient.critical && patient.critical.emergencyContact,
-          doctorName: req.provider && req.provider.name,
-          facility: hospitalFacility,
-          reasonCode: clinicalReason,
-        }).catch((err) => console.error("Notification warning:", err.message));
+          // Persist to tamper-evident hash-chained audit log (Step 4 Audit)
+          if (eventAudit && eventAudit.appendAuditEvent) {
+            await eventAudit.appendAuditEvent({
+              id: event.id,
+              patientId: patient.id,
+              actor: providerWallet,
+              action: "EMERGENCY_BREAK_GLASS",
+              details: { reasonCode: clinicalReason, facility: hospitalFacility, scope: "CRITICAL_ONLY" },
+              timestamp: event.timestamp,
+            });
+          }
+
+          // Record break-glass event in break_glass_events for institutional review
+          if (eventStore.addBreakGlassEvent) {
+            await eventStore.addBreakGlassEvent({
+              id: event.id,
+              patientId: patient.id,
+              doctorId: req.provider.id,
+              reasonCode: clinicalReason,
+              justification: JSON.stringify(encryptedJustification),
+              facility: hospitalFacility,
+              expiresAt,
+              createdAt: event.timestamp,
+            });
+          }
+
+          return event;
+        };
+        const event = store.transaction
+          ? await store.transaction(tx => persist(tx, new AuditChainService(tx)))
+          : await persist(store, auditChain);
 
         res.json({
           accessId: event.id,
@@ -195,6 +196,8 @@ function createEmergencyController({ store, chain, envelopeEncryption, auditChai
       res.json({
         patientId: patient.id,
         critical: patient.critical,
+        source: "Patient reported",
+        summaryUpdatedAt: patient.summaryUpdatedAt || patient.createdAt,
         expiresAt: event.expiresAt,
       });
     }),
@@ -227,7 +230,8 @@ function createEmergencyController({ store, chain, envelopeEncryption, auditChai
       const limit = parseInt(req.query.limit, 10) || 50;
       const offset = parseInt(req.query.offset, 10) || 0;
       const pending = await store.getPendingBreakGlassReviews(limit, offset);
-      res.json(pending);
+      res.json(pending.map(({id, facility, reasonCode, reason_code, createdAt, created_at}) =>
+        ({id, facility, reasonCode: reasonCode || reason_code, createdAt: createdAt || created_at})));
     }),
 
     submitReview: asyncHandler(async (req, res) => {
@@ -242,14 +246,18 @@ function createEmergencyController({ store, chain, envelopeEncryption, auditChai
         });
       }
 
+      const event = await store.auditById(req.params.id);
+      if (!event || event.action !== "EMERGENCY_BREAK_GLASS") return res.status(404).json({error:"Emergency event unavailable"});
+      if (canonicalizeWallet(event.actor) === canonicalizeWallet(req.user.wallet)) return res.status(403).json({error:"Independent reviewer required"});
       const review = await store.addBreakGlassReview({
         id: crypto.randomUUID(),
         eventId: req.params.id,
-        reviewerId: req.user.patientId || req.user.wallet,
+        reviewerId: req.user.wallet,
         decision,
         notes,
       });
 
+      if (!review) return res.status(409).json({error:"Already reviewed"});
       res.status(201).json(review);
     }),
   };

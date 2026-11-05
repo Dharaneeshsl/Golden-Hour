@@ -3,17 +3,10 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { ethers } = require("ethers");
 const { getAdminWallets, getJwtSecret } = require("../config/authConfig");
+const { MfaService } = require("../services/mfaService");
 const { asyncHandler } = require("../utils/asyncHandler");
 
-const nonces = new Map();
-const TTL = 5 * 60 * 1000; // 5 minutes
-
-function cleanup() {
-  const now = Date.now();
-  for (const [key, v] of nonces) {
-    if (v.expiresAt <= now) nonces.delete(key);
-  }
-}
+const TTL = 5 * 60 * 1000;
 
 function parseCookie(cookieHeader, name) {
   if (!cookieHeader) return null;
@@ -24,85 +17,7 @@ function parseCookie(cookieHeader, name) {
 module.exports = ({ store }) => {
   const router = express.Router();
 
-  // B10: SIWE (EIP-4361) Compliant Nonce Generation with Domain Binding
-  router.get("/nonce/:wallet", (req, res) => {
-    cleanup();
-    const rawWallet = req.params.wallet;
-    if (!ethers.isAddress(rawWallet)) {
-      return res.status(400).json({ error: "A valid Ethereum wallet address is required" });
-    }
-    const wallet = ethers.getAddress(rawWallet);
-    const nonce = crypto.randomBytes(32).toString("hex");
-    const domain = process.env.AUTH_DOMAIN || "goldenhour.health";
-    const uri = process.env.AUTH_URI || "https://goldenhour.health";
-    const chainId = parseInt(process.env.CHAIN_ID, 10) || 1;
-    const issuedAt = new Date().toISOString();
-
-    // Standard EIP-4361 SIWE formatted message
-    const siweMessage = `${domain} wants you to sign in with your Ethereum account:\n${wallet}\n\nSign in to GoldenHour Medical Access.\n\nURI: ${uri}\nVersion: 1\nChain ID: ${chainId}\nNonce: ${nonce}\nIssued At: ${issuedAt}`;
-
-    nonces.set(wallet, {
-      nonce,
-      domain,
-      uri,
-      chainId,
-      issuedAt,
-      siweMessage,
-      expiresAt: Date.now() + TTL,
-    });
-
-    res.json({
-      nonce,
-      domain,
-      uri,
-      chainId,
-      issuedAt,
-      message: `GoldenHour authentication nonce: ${nonce}`,
-      siweMessage,
-      expiresIn: TTL / 1000,
-    });
-  });
-
-  // B10 & B11: SIWE Verification, Short Access Tokens, Rotating Refresh Tokens & Server Sessions
-  router.post("/verify", asyncHandler(async (req, res) => {
-    cleanup();
-    const { wallet: rawWallet, signature, message: clientMessage } = req.body || {};
-    if (!rawWallet || !ethers.isAddress(rawWallet) || !signature) {
-      return res.status(400).json({ error: "wallet and signature are required" });
-    }
-
-    const wallet = ethers.getAddress(rawWallet);
-    const entry = nonces.get(wallet);
-    if (!entry) {
-      return res.status(401).json({ error: "Nonce missing or expired" });
-    }
-
-    // Cryptographic verification: accepts either SIWE or standard nonce message
-    let recoveredRaw = null;
-    try {
-      const standardNonceMsg = `GoldenHour authentication nonce: ${entry.nonce}`;
-      if (clientMessage && clientMessage.includes(entry.nonce)) {
-        recoveredRaw = ethers.verifyMessage(clientMessage, signature);
-      } else {
-        // Try standard nonce first, fallback to SIWE message
-        try {
-          recoveredRaw = ethers.verifyMessage(standardNonceMsg, signature);
-        } catch (_) {
-          recoveredRaw = ethers.verifyMessage(entry.siweMessage, signature);
-        }
-      }
-    } catch (e) {
-      return res.status(401).json({ error: "Cryptographic signature verification failed" });
-    }
-
-    const recovered = ethers.getAddress(recoveredRaw);
-    if (recovered !== wallet) {
-      return res.status(401).json({ error: "Invalid wallet signature" });
-    }
-
-    // Single-use nonce consumed immediately
-    nonces.delete(wallet);
-
+  async function issueSession(req, res, wallet, mfaVerified = false, recoveryCodes) {
     const admins = getAdminWallets();
     const provider = await store.providerByWallet(wallet);
     const patient = await store.patientByWallet(wallet);
@@ -125,7 +40,8 @@ module.exports = ({ store }) => {
     if (store.createSession) {
       await store.createSession({
         id: sessionId,
-        userId: patient ? patient.id : null,
+        wallet,
+        mfaVerified,
         tokenHash,
         ipAddress: req.ip,
         userAgent: req.headers["user-agent"],
@@ -133,7 +49,7 @@ module.exports = ({ store }) => {
       });
     }
 
-    const user = { wallet, role, patientId: patient ? patient.id : null, sessionId };
+    const user = { wallet, role, patientId: patient ? patient.id : null, sessionId, mfaVerified };
     const secret = getJwtSecret();
     const token = jwt.sign(user, secret, {
       expiresIn: "15m",
@@ -149,7 +65,83 @@ module.exports = ({ store }) => {
       }`
     );
 
-    res.json({ token, user, sessionId });
+    res.json({ token, user, sessionId, recoveryCodes });
+  }
+
+  router.post("/mfa/setup", asyncHandler(async (req,res) => {
+    try { res.json(await new MfaService(store).setup(req.body?.mfaToken)); }
+    catch { res.status(401).json({error:"Authenticator setup unavailable. Sign in again."}); }
+  }));
+  router.post("/mfa/complete", asyncHandler(async (req,res) => {
+    let result;
+    try { result = await new MfaService(store).complete(req.body?.mfaToken, req.body?.code); }
+    catch { return res.status(401).json({error:"Code invalid, already used, or login expired. After five failed attempts, wait 15 minutes before signing in again."}); }
+    return issueSession(req,res,result.wallet,true,result.recoveryCodes);
+  }));
+
+  // B10: SIWE (EIP-4361) Compliant Nonce Generation with Domain Binding
+  router.get("/nonce/:wallet", asyncHandler(async (req, res) => {
+    const rawWallet = req.params.wallet;
+    if (!ethers.isAddress(rawWallet)) {
+      return res.status(400).json({ error: "A valid Ethereum wallet address is required" });
+    }
+    const wallet = ethers.getAddress(rawWallet);
+    const nonce = crypto.randomBytes(32).toString("hex");
+    const domain = process.env.AUTH_DOMAIN || "goldenhour.health";
+    const uri = process.env.AUTH_URI || "https://goldenhour.health";
+    const chainId = parseInt(process.env.CHAIN_ID, 10) || 1;
+    const issuedAt = new Date().toISOString();
+
+    const expiresAt = new Date(Date.now() + TTL).toISOString();
+    // Standard EIP-4361 SIWE formatted message
+    const siweMessage = `${domain} wants you to sign in with your Ethereum account:\n${wallet}\n\nSign in to GoldenHour Medical Access.\n\nURI: ${uri}\nVersion: 1\nChain ID: ${chainId}\nNonce: ${nonce}\nIssued At: ${issuedAt}\nExpiration Time: ${expiresAt}`;
+
+    await store.saveChallenge(wallet, siweMessage, expiresAt);
+    res.json({
+      nonce,
+      domain,
+      uri,
+      chainId,
+      issuedAt,
+      message: siweMessage,
+      siweMessage,
+      expiresIn: TTL / 1000,
+    });
+  }));
+
+  // B10 & B11: SIWE Verification, Short Access Tokens, Rotating Refresh Tokens & Server Sessions
+  router.post("/verify", asyncHandler(async (req, res) => {
+    const { wallet: rawWallet, signature, message: clientMessage } = req.body || {};
+    if (!rawWallet || !ethers.isAddress(rawWallet) || !signature) {
+      return res.status(400).json({ error: "wallet and signature are required" });
+    }
+
+    const wallet = ethers.getAddress(rawWallet);
+    const entry = await store.getChallenge(wallet);
+    if (!entry) {
+      return res.status(401).json({ error: "Nonce missing or expired" });
+    }
+
+    if (clientMessage !== undefined && clientMessage !== entry.message) {
+      return res.status(401).json({ error: "Challenge message mismatch" });
+    }
+    try {
+      if (ethers.verifyMessage(entry.message, signature) !== wallet) {
+        return res.status(401).json({ error: "Invalid wallet signature" });
+      }
+    } catch {
+      return res.status(401).json({ error: "Invalid wallet signature" });
+    }
+    if (!await store.consumeChallenge(wallet, entry.message)) {
+      return res.status(401).json({ error: "Challenge expired or already used" });
+    }
+
+    const staff = getAdminWallets().includes(wallet) || await store.providerByWallet(wallet);
+    if (staff && (process.env.NODE_ENV === "production" || process.env.REQUIRE_STAFF_MFA === "true")) {
+      return res.json(await new MfaService(store).challenge(wallet));
+    }
+    return issueSession(req,res,wallet);
+
   }));
 
   // B11: Refresh Token Rotation
@@ -180,37 +172,19 @@ module.exports = ({ store }) => {
     const newRefreshToken = crypto.randomBytes(32).toString("hex");
     const newTokenHash = crypto.createHash("sha256").update(newRefreshToken).digest("hex");
 
-    if (store.revokeSession && store.createSession) {
-      await store.revokeSession(session.id);
-      const newSessionId = crypto.randomUUID();
-      await store.createSession({
-        id: newSessionId,
-        userId: session.userId || session.user_id,
-        tokenHash: newTokenHash,
-        ipAddress: req.ip,
-        userAgent: req.headers["user-agent"],
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-      });
-      session.id = newSessionId;
+    const userWallet = session.wallet;
+    if (!ethers.isAddress(userWallet) || !await store.rotateRefresh(session.id, tokenHash, newTokenHash)) {
+      return res.status(401).json({error: "Refresh token expired or already used"});
     }
-
-    // Lookup user to issue new access token
-    let userWallet = null;
-    let role = "unregistered";
-    let patientId = null;
-
-    if (session.userId || session.user_id) {
-      const patient = await store.patientById(session.userId || session.user_id);
-      if (patient) {
-        userWallet = patient.wallet;
-        role = "patient";
-        patientId = patient.id;
-      }
-    }
+    const patient = await store.patientByWallet(userWallet);
+    const provider = await store.providerByWallet(userWallet);
+    const patientId = patient?.id || null;
+    const role = getAdminWallets().includes(userWallet) ? "admin" :
+      provider ? "doctor" : patient ? "patient" : "unregistered";
 
     const secret = getJwtSecret();
     const newToken = jwt.sign(
-      { wallet: userWallet, role, patientId, sessionId: session.id },
+      { wallet: userWallet, role, patientId, sessionId: session.id, mfaVerified: session.mfa_verified || false },
       secret,
       { expiresIn: "15m", algorithm: "HS256", issuer: "goldenhour" }
     );
@@ -232,7 +206,7 @@ module.exports = ({ store }) => {
 
     if (authHeader) {
       try {
-        const decoded = jwt.decode(authHeader);
+        const decoded = jwt.verify(authHeader, getJwtSecret(), { algorithms: ["HS256"], issuer: "goldenhour" });
         if (decoded && decoded.sessionId) {
           sessionId = decoded.sessionId;
         }

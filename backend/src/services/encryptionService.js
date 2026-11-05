@@ -12,7 +12,7 @@ function key() {
     }
     raw = devFallbackKey();
   }
-  const k = Buffer.from(raw, "base64");
+  const k = Buffer.from(raw, /^[0-9a-f]{64}$/i.test(raw) ? "hex" : "base64");
   if (k.length !== 32) throw new Error("ENCRYPTION_KEY must be a base64-encoded 32-byte key");
   return k;
 }

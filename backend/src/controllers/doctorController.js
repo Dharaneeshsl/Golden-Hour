@@ -1,14 +1,31 @@
+const {ethers} = require("ethers");
+const {AuditChainService} = require("../services/auditChainService");
 const crypto = require("crypto");
 const { canonicalizeWallet } = require("../config/db");
 const { asyncHandler } = require("../utils/asyncHandler");
 
 function createDoctorController({ store, chain, auditChain }) {
   return {
+    invite: asyncHandler(async (req,res) => {
+      if (req.user.role !== "admin") return res.sendStatus(403);
+      if (!ethers.isAddress(req.body?.wallet)) return res.status(400).json({error:"Valid clinician wallet required"});
+      const wallet = ethers.getAddress(req.body.wallet);
+      const token = crypto.randomBytes(32).toString("hex");
+      const id = crypto.randomUUID();
+      const expiresAt = new Date(Date.now()+24*60*60*1000).toISOString();
+      await store.transaction(async tx => {
+        await tx.query("INSERT INTO staff_invitations(id,wallet,token_hash,invited_by,expires_at) VALUES ($1,$2,$3,$4,$5)",
+          [id,wallet,crypto.createHash("sha256").update(token).digest("hex"),req.user.wallet,expiresAt]);
+        await new AuditChainService(tx).appendAuditEvent({actor:req.user.wallet,action:"STAFF_INVITED",details:{wallet,invitationId:id}});
+      });
+      res.status(201).json({token,wallet,expiresAt});
+    }),
+
     register: asyncHandler(async (req, res) => {
       const wallet = canonicalizeWallet(req.user.wallet);
       const { name, licenseNumber, specialty } = req.body || {};
 
-      if (!name || !licenseNumber || !specialty) {
+      if (![name,licenseNumber,specialty].every(value => typeof value === "string" && value.trim().length>0 && value.length<=200)) {
         return res
           .status(400)
           .json({ error: "name, licenseNumber and specialty are required" });
@@ -21,7 +38,19 @@ function createDoctorController({ store, chain, auditChain }) {
           .json({ error: "Provider already registered", provider: existing });
       }
 
-      const provider = await store.addProvider({
+      const register = async (tx, transactionAudit) => {
+        if (process.env.NODE_ENV === "production" || process.env.STAFF_INVITE_ONLY === "true") {
+          const token = req.body?.invitationToken;
+          if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) {
+            const error = new Error("A hospital invitation is required"); error.status = 403; throw error;
+          }
+          const invitation = await tx.query("UPDATE staff_invitations SET consumed_at=now() WHERE wallet=$1 AND token_hash=$2 AND consumed_at IS NULL AND expires_at>now() RETURNING id",
+            [wallet,crypto.createHash("sha256").update(token).digest("hex")]);
+          if (!invitation.rowCount) {
+            const error = new Error("Invitation expired, used or issued to a different wallet"); error.status=403; throw error;
+          }
+        }
+      const provider = await tx.addProvider({
         id: crypto.randomUUID(),
         wallet,
         name: name.trim(),
@@ -31,7 +60,7 @@ function createDoctorController({ store, chain, auditChain }) {
         createdAt: new Date().toISOString(),
       });
 
-      await store.addAudit({
+      await tx.addAudit({
         id: crypto.randomUUID(),
         actor: wallet,
         action: "PROVIDER_REGISTERED",
@@ -39,13 +68,19 @@ function createDoctorController({ store, chain, auditChain }) {
         timestamp: new Date().toISOString(),
       });
 
-      if (auditChain && auditChain.appendAuditEvent) {
-        await auditChain.appendAuditEvent({
+      if (transactionAudit && transactionAudit.appendAuditEvent) {
+        await transactionAudit.appendAuditEvent({
           actor: wallet,
           action: "PROVIDER_REGISTERED",
           details: { providerId: provider.id, specialty: provider.specialty },
         });
       }
+
+        return provider;
+      };
+      const provider = store.transaction
+        ? await store.transaction(tx => register(tx,new AuditChainService(tx)))
+        : await register(store,auditChain);
 
       res.status(201).json(provider);
     }),

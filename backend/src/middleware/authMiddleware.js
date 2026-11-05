@@ -10,7 +10,9 @@ async function requireAuth(req, res, next) {
     const secret = getJwtSecret();
     const payload = jwt.verify(token, secret, { algorithms: ["HS256"], issuer: "goldenhour" });
 
+    if (payload.purpose) return res.status(401).json({error:"Complete sign-in first"});
     // Canonicalize wallet in user context
+    if (process.env.NODE_ENV === "production" && !payload.sessionId) return res.status(401).json({error: "A current session is required"});
     const userWallet = canonicalizeWallet(payload.wallet);
 
     // Live re-check for admin role (Bug #11)
@@ -28,6 +30,10 @@ async function requireAuth(req, res, next) {
       }
     }
 
+    if ((process.env.NODE_ENV === "production" || process.env.REQUIRE_STAFF_MFA === "true") && !payload.mfaVerified) {
+      const staff = isCurrentAdmin(userWallet) || await store.providerByWallet(userWallet);
+      if (staff) return res.status(401).json({error:"Sign in again with your authenticator",code:"MFA_REQUIRED"});
+    }
     req.user = { ...payload, wallet: userWallet, role: userRole };
     next();
   } catch (err) {

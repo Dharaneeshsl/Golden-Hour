@@ -19,7 +19,7 @@ function canonicalJsonStringify(obj) {
   );
 }
 
-function createRecordController({ store, encryption, ipfs, chain, auditChain }) {
+function createRecordController({ store, encryption, ipfs, chain, auditChain, envelopeEncryption }) {
   const canRead = async (req, patient) => {
     const reqWallet = canonicalizeWallet(req.user.wallet);
     const patientWallet = canonicalizeWallet(patient.wallet);
@@ -64,7 +64,10 @@ function createRecordController({ store, encryption, ipfs, chain, auditChain }) 
       }
 
       try {
-        const encrypted = encryption.encryptJson(clinicalData);
+        const recordId = crypto.randomUUID();
+        const encrypted = process.env.NODE_ENV === "production"
+          ? await envelopeEncryption.encryptField(patientId, {value: clinicalData}, {patientId, recordId, version:2})
+          : encryption.encryptJson(clinicalData);
         const stored = await ipfs.uploadEncrypted(encrypted);
 
         const rawHash = crypto
@@ -92,7 +95,7 @@ function createRecordController({ store, encryption, ipfs, chain, auditChain }) 
         }
 
         const record = await store.addRecord({
-          id: crypto.randomUUID(),
+          id: recordId,
           patientId,
           recordType: recordType.trim(),
           doctorId: provider.wallet,
@@ -171,7 +174,12 @@ function createRecordController({ store, encryption, ipfs, chain, auditChain }) 
           return res.status(500).json({ error: "Encrypted payload integrity check failed" });
         }
 
-        const clinicalData = encryption.decryptJson(encrypted);
+        if (encrypted.version === 2 && (encrypted.aad?.patientId !== patient.id || encrypted.aad?.recordId !== record.id)) {
+          throw new Error("Record binding mismatch");
+        }
+        const clinicalData = encrypted.version === 2
+          ? (await envelopeEncryption.decryptField(patient.id, encrypted)).value
+          : encryption.decryptJson(encrypted);
         res.json({ ...record, clinicalData });
       } catch (e) {
         console.error("Record detail error:", e);

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { api, getToken } from "../api";
 import { REASON_CODES } from "../config/i18n";
 
-export default function EmergencyScanView({ initialPatientId = "" }) {
+export default function EmergencyScanView({ initialPatientId = "", cardToken }) {
   const [patientId, setPatientId] = useState(initialPatientId);
   const [reasonCode, setReasonCode] = useState(REASON_CODES[0]?.code || "TRAUMA_UNRESPONSIVE");
   const [facility, setFacility] = useState("");
@@ -14,6 +15,15 @@ export default function EmergencyScanView({ initialPatientId = "" }) {
   const [expired, setExpired] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!accessGrant) return;
+    const timer = setTimeout(() => {
+      setCriticalData(null);
+      setExpired(true);
+    }, Math.max(0, Date.parse(accessGrant.expiresAt) - Date.now()));
+    return () => clearTimeout(timer);
+  }, [accessGrant]);
 
   const token = getToken();
 
@@ -29,7 +39,7 @@ export default function EmergencyScanView({ initialPatientId = "" }) {
       setError("Clinician authentication required. Please connect your verified provider wallet.");
       return;
     }
-    if (!patientId.trim()) {
+    if (!cardToken && !patientId.trim()) {
       setError("Please enter a valid Patient ID.");
       return;
     }
@@ -42,7 +52,7 @@ export default function EmergencyScanView({ initialPatientId = "" }) {
     setError("");
     setExpired(false);
     try {
-      const access = await api.emergency({ patientId: patientId.trim(), justification, reasonCode, facility });
+      const access = await api.emergency({ cardToken, patientId: patientId.trim(), justification, reasonCode, facility });
       setAccessGrant(access);
     } catch (err) {
       setError(err.message || "Failed to trigger emergency break-glass access");
@@ -57,7 +67,8 @@ export default function EmergencyScanView({ initialPatientId = "" }) {
     setError("");
     try {
       const data = await api.emergencyCritical(accessGrant.accessId);
-      setCriticalData(data);
+      if (Date.parse(data.expiresAt) > Date.now()) setCriticalData(data);
+      else setExpired(true);
     } catch (err) {
       if (err.status === 410) {
         setExpired(true);
@@ -78,7 +89,7 @@ export default function EmergencyScanView({ initialPatientId = "" }) {
           <b>Break-Glass Emergency Access</b>
           <p>
             Logged clinical access for life-threatening emergencies. Every break-glass trigger is
-            recorded in the patient's immutable audit log. Access window automatically expires after 15 minutes.
+            recorded in the patient's access history. Access window automatically expires after 15 minutes.
           </p>
         </div>
       </div>
@@ -86,18 +97,19 @@ export default function EmergencyScanView({ initialPatientId = "" }) {
       {!token && (
         <div className="panel error-box">
           <h3>Authentication Required</h3>
+          {cardToken && <Link to="/login" state={{cardToken}}>Sign in to open this card</Link>}
           <p>You must connect a verified clinician wallet to request emergency access.</p>
         </div>
       )}
 
       <div className="panel">
         <h3>Emergency Patient Lookup</h3>
-        <label>Patient ID</label>
+        {cardToken ? <p>Scanned card. Confirm patient identity using hospital procedure before continuing.</p> : <><label>Patient ID</label>
         <input
           value={patientId}
           onChange={(e) => setPatientId(e.target.value)}
           placeholder="e.g. uuid-patient-id"
-        />
+        /></>}
 
         <label>Clinical Reason Code</label>
         <select value={reasonCode} onChange={(e) => setReasonCode(e.target.value)} style={{ marginBottom: "0.75rem", width: "100%", padding: "0.5rem" }}>
@@ -158,6 +170,7 @@ export default function EmergencyScanView({ initialPatientId = "" }) {
               Critical medical context retrieved. Access expires at{" "}
               {new Date(criticalData.expiresAt).toLocaleTimeString()}.
             </p>
+            <p>{criticalData.source}. Last updated {criticalData.summaryUpdatedAt ? new Date(criticalData.summaryUpdatedAt).toLocaleString() : "unknown"}.</p>
             <div className="critical-grid">
               <div>
                 <span>Blood Group</span>
@@ -165,15 +178,15 @@ export default function EmergencyScanView({ initialPatientId = "" }) {
               </div>
               <div>
                 <span>Allergies</span>
-                <strong>{(criticalData.critical?.allergies || []).join(", ") || "None"}</strong>
+                <strong>{(criticalData.critical?.allergies || []).join(", ") || "Unknown"}</strong>
               </div>
               <div>
                 <span>Known Conditions</span>
-                <strong>{(criticalData.critical?.conditions || []).join(", ") || "None"}</strong>
+                <strong>{(criticalData.critical?.conditions || []).join(", ") || "Unknown"}</strong>
               </div>
               <div>
                 <span>Current Medications</span>
-                <strong>{(criticalData.critical?.medications || []).join(", ") || "None"}</strong>
+                <strong>{(criticalData.critical?.medications || []).join(", ") || "Unknown"}</strong>
               </div>
             </div>
           </div>

@@ -6,6 +6,14 @@ function validObject(value) {
   return value && typeof value === "object" && !Array.isArray(value);
 }
 
+function validCritical(value) {
+  if (!validObject(value)) return false;
+  if (value.bloodGroup !== undefined && (typeof value.bloodGroup !== "string" || value.bloodGroup.length>100)) return false;
+  return ["allergies","conditions","medications"].every(key =>
+    value[key] === undefined || (Array.isArray(value[key]) && value[key].length<=100 &&
+      value[key].every(item => typeof item === "string" && item.length<=500)));
+}
+
 function createPatientController({ store, chain, auditChain }) {
   const owned = async (req, res, id) => {
     const patient = await store.patientById(id);
@@ -23,11 +31,19 @@ function createPatientController({ store, chain, auditChain }) {
   };
 
   return {
+    issueCard: asyncHandler(async (req, res) => {
+      const patient = await store.patientByWallet(req.user.wallet);
+      if (!patient) return res.status(404).json({error: "Patient enrollment required"});
+      const token = crypto.randomBytes(32).toString("hex");
+      await store.replaceCard(patient.id, crypto.createHash("sha256").update(token).digest("hex"));
+      res.status(201).json({token});
+    }),
+
     create: asyncHandler(async (req, res) => {
       const wallet = canonicalizeWallet(req.user.wallet);
       const { profile, critical } = req.body || {};
 
-      if (!validObject(profile) || !validObject(critical)) {
+      if (!validObject(profile) || !validCritical(critical)) {
         return res.status(400).json({ error: "profile and critical must be valid objects" });
       }
 
@@ -95,12 +111,15 @@ function createPatientController({ store, chain, auditChain }) {
       if (profile && !validObject(profile)) {
         return res.status(400).json({ error: "profile must be an object" });
       }
-      if (critical && !validObject(critical)) {
+      if (critical !== undefined && !validCritical(critical)) {
         return res.status(400).json({ error: "critical must be an object" });
       }
 
       try {
-        const updated = await store.updatePatient(patient.id, { profile, critical });
+        const revision = req.body?.revision;
+        if (!Number.isInteger(revision)) return res.status(428).json({error: "Reload the patient summary before editing"});
+        const updated = await store.updatePatient(patient.id, { profile, critical, revision });
+        if (!updated) return res.status(409).json({error: "The summary changed. Reload and review the latest version."});
 
         if (chain.enabled) {
           await chain.updatePatientHashes(patient.wallet, updated.profile, updated.critical);

@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { VaultKeyService } = require("./vaultKeyService");
 
 /**
  * Envelope Encryption Service for Healthcare Data (AES-256-GCM + KMS Wrap)
@@ -10,8 +11,15 @@ const crypto = require("crypto");
  * - Supports Crypto-Shredding with genuine cryptographic destruction of the stored wrapped DEK
  * - Fully asynchronous with concurrency guards
  */
+function canonicalAAD(value) {
+  if (Array.isArray(value)) return value.map(canonicalAAD);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.keys(value).sort().map(key => [key,canonicalAAD(value[key])]));
+}
+
 class EnvelopeEncryptionService {
-  constructor(masterKeyHex = process.env.KMS_MASTER_KEY, store = null) {
+  constructor(masterKeyHex = process.env.KMS_MASTER_KEY, store = null, keyService = null) {
+    this.keyService = keyService || (process.env.VAULT_ADDR ? new VaultKeyService() : null);
     let keyBuf = null;
     if (masterKeyHex) {
       keyBuf = Buffer.from(masterKeyHex, "hex");
@@ -25,7 +33,8 @@ class EnvelopeEncryptionService {
       }
     }
 
-    if (!keyBuf || keyBuf.length !== 32) {
+    if (keyBuf && keyBuf.length !== 32) throw new Error("Legacy master key must be 32 bytes");
+    if ((!keyBuf || keyBuf.length !== 32) && !this.keyService) {
       if (process.env.NODE_ENV === "production") {
         throw new Error(
           "KMS Root Key (KMS_MASTER_KEY or ENCRYPTION_KEY) must be a verified 256-bit (32-byte) key in production"
@@ -48,6 +57,13 @@ class EnvelopeEncryptionService {
    * Generates and wraps a fresh 256-bit DEK for a patient and awaits persistence in key_registry
    */
   async generatePatientDEK(patientId) {
+    if (this.store?.transaction && !this.store.inTransaction && process.env.NODE_ENV === "production") {
+      return this.store.transaction(async tx => {
+        await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [patientId]);
+        const scoped = new EnvelopeEncryptionService(this.masterKey?.toString("hex"), tx, this.keyService);
+        return scoped.generatePatientDEK(patientId);
+      });
+    }
     // Concurrency guard: check if another thread/instance created a key in the interim
     if (this.store && this.store.getKeyRecord) {
       const existing = await this.store.getKeyRecord(patientId);
@@ -59,13 +75,15 @@ class EnvelopeEncryptionService {
     const rawDEK = crypto.randomBytes(32);
     const keyId = `key_${crypto.randomBytes(8).toString("hex")}_${Date.now()}`;
 
-    // Encrypt DEK with Master KMS Key using AES-256-GCM
-    const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv("aes-256-gcm", this.masterKey, iv);
-    const wrappedDEK = Buffer.concat([cipher.update(rawDEK), cipher.final()]);
-    const tag = cipher.getAuthTag();
-
-    const packedEnvelope = `${iv.toString("base64")}:${tag.toString("base64")}:${wrappedDEK.toString("base64")}`;
+    let packedEnvelope;
+    if (this.keyService) {
+      packedEnvelope = await this.keyService.wrap(rawDEK);
+    } else {
+      const iv = crypto.randomBytes(12);
+      const cipher = crypto.createCipheriv("aes-256-gcm", this.masterKey, iv);
+      const wrappedDEK = Buffer.concat([cipher.update(rawDEK), cipher.final()]);
+      packedEnvelope = `${iv.toString("base64")}:${cipher.getAuthTag().toString("base64")}:${wrappedDEK.toString("base64")}`;
+    }
 
     const record = {
       keyId,
@@ -110,6 +128,11 @@ class EnvelopeEncryptionService {
     // If generated in-process, return rawDEK directly
     if (record.rawDEK) return record.rawDEK;
 
+    if (cipherText.startsWith("vault:")) {
+      if (!this.keyService) throw new Error("Vault is required to unwrap this key");
+      return this.keyService.unwrap(cipherText);
+    }
+    if (!this.masterKey) throw new Error("Legacy wrapping key required for migration");
     const parts = cipherText.split(":");
     if (parts.length !== 3) {
       throw new Error("Invalid or corrupted wrapped DEK format in key_registry");
@@ -143,7 +166,7 @@ class EnvelopeEncryptionService {
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv("aes-256-gcm", dek, iv);
 
-    const aadBuffer = Buffer.from(JSON.stringify(aadContext));
+    const aadBuffer = Buffer.from(JSON.stringify(canonicalAAD(aadContext)));
     cipher.setAAD(aadBuffer);
 
     const serialized = typeof plainValue === "string" ? plainValue : JSON.stringify(plainValue);
@@ -157,6 +180,7 @@ class EnvelopeEncryptionService {
       iv: iv.toString("base64"),
       tag: tag.toString("base64"),
       ciphertext: ciphertext.toString("base64"),
+      aadEncoding: "sorted-json",
       aad: aadContext,
     };
   }
@@ -177,7 +201,7 @@ class EnvelopeEncryptionService {
     decipher.setAuthTag(Buffer.from(payload.tag, "base64"));
 
     if (payload.aad) {
-      decipher.setAAD(Buffer.from(JSON.stringify(payload.aad)));
+      decipher.setAAD(Buffer.from(JSON.stringify(payload.aadEncoding === "sorted-json" ? canonicalAAD(payload.aad) : payload.aad)));
     }
 
     const decrypted = Buffer.concat([

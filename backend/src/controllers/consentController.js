@@ -89,7 +89,7 @@ function createConsentController({ store, chain, auditChain }) {
 
         if (auditChain && auditChain.appendAuditEvent) {
           await auditChain.appendAuditEvent({
-            id: consent.id,
+            id: crypto.randomUUID(),
             patientId: patient.id,
             actor: reqWallet,
             action: "CONSENT_GRANTED",
@@ -152,7 +152,7 @@ function createConsentController({ store, chain, auditChain }) {
 
         if (auditChain && auditChain.appendAuditEvent) {
           await auditChain.appendAuditEvent({
-            id: consent.id,
+            id: crypto.randomUUID(),
             patientId: patient.id,
             actor: reqWallet,
             action: "CONSENT_REVOKED",

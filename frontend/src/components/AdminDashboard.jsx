@@ -5,6 +5,12 @@ export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState("providers"); // 'providers' | 'patients' | 'audits'
   const [providerStatus, setProviderStatus] = useState("pending");
   const [providers, setProviders] = useState([]);
+  const [operations, setOperations] = useState(null);
+  const [inviteWallet, setInviteWallet] = useState("");
+  const [invitation, setInvitation] = useState(null);
+  const [recoveries, setRecoveries] = useState([]);
+  const [identityConfirmed, setIdentityConfirmed] = useState(false);
+  const [reviews, setReviews] = useState([]);
   const [patients, setPatients] = useState([]);
   const [audits, setAudits] = useState([]);
   const [error, setError] = useState("");
@@ -23,6 +29,9 @@ export default function AdminDashboard() {
     setError("");
     if (activeTab === "providers") loadProviders();
     else if (activeTab === "patients") loadPatients();
+    else if (activeTab === "operations") api.operations().then(setOperations).catch(e => setError(e.message));
+    else if (activeTab === "recovery") api.recoveries().then(setRecoveries).catch(e => setError(e.message));
+    else if (activeTab === "reviews") api.pendingReviews().then(setReviews).catch(e => setError(e.message));
     else if (activeTab === "audits") loadAudits();
   }, [activeTab, providerStatus]);
 
@@ -69,10 +78,68 @@ export default function AdminDashboard() {
           >
             Emergency Access Audits
           </button>
+          <button onClick={() => setActiveTab("recovery")}>Patient recovery</button>
+          <button onClick={() => setActiveTab("operations")}>Incident controls</button>
+          <button onClick={() => setActiveTab("reviews")}>Pending reviews</button>
         </div>
 
         {error && <p className="error">{error}</p>}
 
+        {activeTab === "recovery" && <section>
+          <h3>Patient account recovery</h3>
+          <p>Two different administrators must independently verify the patient through hospital procedure. Approval replaces the wallet and revokes prior sessions, cards and consent grants.</p>
+          <label><input type="checkbox" checked={identityConfirmed} onChange={e => setIdentityConfirmed(e.target.checked)} /> I completed the hospital identity check for the request I am reviewing.</label>
+          {recoveries.map(item => <article key={item.id}>
+            <p>Case {item.proofReference} · {item.approvals.length} approvals</p>
+            <p>Previous wallet {item.oldWallet}</p><p>New wallet {item.newWallet}</p>
+            {["approve","reject"].map(decision => <button key={decision} disabled={!!busy || (decision==="approve" && !identityConfirmed)} onClick={async () => {
+              setBusy(item.id);
+              try {await api.reviewRecovery(item.id,decision);setRecoveries(await api.recoveries());setIdentityConfirmed(false);}
+              catch (err) {setError(err.message);}
+              finally {setBusy("");}
+            }}>{decision==="approve" ? "Approve recovery" : "Reject recovery"}</button>)}
+          </article>)}
+        </section>}
+        {activeTab === "operations" && operations && <section>
+          <h3>Incident controls</h3>
+          <p>Pausing emergency access blocks new grants and further reads. Inform clinical staff to use the hospital’s usual care procedure.</p>
+          {["enrollment_paused", "emergency_paused"].map(key => <button key={key} disabled={!!busy}
+            onClick={async () => {
+              setBusy(key);
+              try { setOperations(await api.updateOperations({...operations,[key]:!operations[key]})); }
+              catch (err) {setError(err.message);}
+              finally {setBusy("");}
+            }}>{key === "enrollment_paused" ? "Patient enrollment" : "Emergency access"} — {operations[key] ? "Paused · resume" : "Active · pause"}</button>)}
+        </section>}
+        {activeTab === "reviews" && <section>
+          <h3>Review emergency access</h3>
+          {reviews.length === 0 && <p>No pending reviews.</p>}
+          {reviews.map(event => <article key={event.id}>
+            <p>{event.facility} · {event.reasonCode || event.reason_code} · {new Date(event.createdAt || event.created_at).toLocaleString()}</p>
+            <p>Access reference {event.id}</p>
+            {["approved", "investigation_required"].map(decision =>
+              <button key={decision} disabled={!!busy} onClick={async () => {
+                setBusy(event.id);
+                try {
+                  await api.reviewEmergency(event.id, decision);
+                  setReviews(rows => rows.filter(row => row.id !== event.id));
+                } catch (err) { setError(err.message); }
+                finally { setBusy(""); }
+              }}>{decision === "approved" ? "Approve access" : "Request investigation"}</button>)}
+          </article>)}
+        </section>}
+
+        {activeTab === "providers" && <form onSubmit={async event => {
+          event.preventDefault(); setBusy("invitation"); setError("");
+          try {setInvitation(await api.inviteStaff(inviteWallet));setInviteWallet("");}
+          catch (err) {setError(err.message);}
+          finally {setBusy("");}
+        }}>
+          <label htmlFor="invite-wallet">Invite a clinician wallet</label>
+          <input id="invite-wallet" value={inviteWallet} onChange={event => setInviteWallet(event.target.value)} required />
+          <button disabled={!!busy}>Create invitation</button>
+          {invitation && <p>Share this one-use invitation with the clinician through your hospital’s approved channel. It expires in 24 hours. <code>{invitation.token}</code></p>}
+        </form>}
         {activeTab === "providers" && (
           <div>
             <div className="admin-tabs" style={{ marginBottom: "1rem" }}>

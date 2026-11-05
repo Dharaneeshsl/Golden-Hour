@@ -47,7 +47,7 @@ export default function ConsentManager({ patientId }) {
     <article className="panel wide">
       <h3>Provider Consent Management</h3>
       <p className="muted">
-        Grant verified clinicians access to view your encrypted medical records. Scope is restricted to medical records (`records`).
+        Choose a verified clinician who may view and add medical records. You can revoke this access.
       </p>
 
       <form className="inline-form" onSubmit={grant} style={{ marginTop: "1rem" }}>

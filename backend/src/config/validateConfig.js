@@ -24,6 +24,18 @@ function validateStartupConfig() {
 
   // 3. Production environment constraints
   if (process.env.NODE_ENV === "production") {
+    if (process.env.DB_SSL !== "true" || process.env.DB_REJECT_UNAUTHORIZED === "false" || (!process.env.DB_CA && !process.env.DB_CA_PEM)) {
+      throw new Error("Production requires verified PostgreSQL TLS and DB_CA");
+    }
+    const database = new URL(process.env.DATABASE_URL);
+    if (["sslmode","sslrootcert","sslcert","sslkey","ssl"].some(key => database.searchParams.has(key))) {
+      throw new Error("Configure database TLS through DB_CA, not connection string overrides");
+    }
+    const origin = new URL(process.env.AUTH_URI);
+    if (origin.protocol !== "https:" || origin.host !== process.env.AUTH_DOMAIN ||
+        origin.origin !== process.env.FRONTEND_ORIGIN) {
+      throw new Error("Configure matching HTTPS login and frontend origins");
+    }
     if (!process.env.ADMIN_WALLETS) {
       throw new Error("ADMIN_WALLETS environment variable must be configured in production.");
     }

@@ -4,6 +4,7 @@ const { requireRole } = require("../middleware/roleCheck");
 
 module.exports = (c) => {
   const r = express.Router();
+  r.post("/invitations", requireAuth, c.invite);
   r.post("/register", requireAuth, c.register);
   r.get("/access", requireAuth, c.access);
   r.get("/", requireAuth, requireRole("admin"), c.list);

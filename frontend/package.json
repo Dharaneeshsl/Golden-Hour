@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=24.0.0"
   },
   "scripts": {
     "dev": "vite",
@@ -13,15 +13,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "^4.3.1",
     "ethers": "^6.13.4",
     "qrcode.react": "^4.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.28.0",
-    "vite": "^5.4.8"
+    "react-router-dom": "^7.18.0"
   },
   "devDependencies": {
-    "vitest": "^2.1.5"
+    "vitest": "^5.1.0",
+    "vite": "^8.3.6",
+    "@vitejs/plugin-react": "^6.2.1"
   }
 }

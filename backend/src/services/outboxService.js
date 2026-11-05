@@ -28,10 +28,15 @@ class OutboxService {
     for (const item of items) {
       try {
         if (item.topic === "SMS_NOTIFICATION" && notificationService) {
-          await notificationService.sendEmergencyAlert(item.payload);
+          const receipts = await notificationService.sendEmergencyAlert(item.payload);
+          if (!Array.isArray(receipts) || !receipts.length || receipts.some(r => r.status !== "DELIVERED")) {
+            throw new Error("SMS delivery is unconfirmed");
+          }
         } else if (item.topic === "BLOCKCHAIN_ANCHOR" && chain && chain.enabled) {
           // Anchors Merkle root or hash commitment on chain
           await chain.anchorRoot(item.payload.rootHash);
+        } else {
+          throw new Error("No active handler for outbox topic");
         }
         await this.store.markOutboxItemCompleted(item.id);
         results.push({ id: item.id, status: "sent" });

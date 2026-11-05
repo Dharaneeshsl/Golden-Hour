@@ -17,7 +17,7 @@ function Home({ user }) {
         <p className="eyebrow">Every second matters</p>
         <h1>Medical context when <em>minutes matter.</em></h1>
         <p className="lead">
-          Encrypted records, wallet-verified authentication, patient-controlled access, and immutable audit trails.
+          Encrypted records, wallet-verified authentication, patient-controlled access, and logged access history.
         </p>
         <div className="hero-actions">
           {!user ? (
@@ -65,7 +65,7 @@ function AdminRoute({ user }) {
 
 function EmergencyRoute() {
   const { id } = useParams();
-  return <EmergencyScanView initialPatientId={id || ""} />;
+  return <EmergencyScanView initialPatientId={id === "card" ? "" : id || ""} cardToken={id === "card" ? window.location.hash.slice(1) : undefined} />;
 }
 
 export default function App() {

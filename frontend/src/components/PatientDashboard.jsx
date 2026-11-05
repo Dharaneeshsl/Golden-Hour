@@ -20,6 +20,21 @@ export default function PatientDashboard({ patientId = "", wallet = "" }) {
   const [busy, setBusy] = useState(false);
   const [downloadingFhir, setDownloadingFhir] = useState(false);
 
+  const downloadArchive = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const archive = await api.patientArchive();
+      const url = URL.createObjectURL(new Blob([JSON.stringify(archive,null,2)],{type:"application/json"}));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "goldenhour-patient-archive.json";
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {setError(err.message);}
+    finally {setBusy(false);}
+  };
+
   const downloadFhirIPS = async () => {
     setDownloadingFhir(true);
     try {
@@ -94,7 +109,7 @@ export default function PatientDashboard({ patientId = "", wallet = "" }) {
           .filter(Boolean),
       };
 
-      await api.updatePatient(patientId, { critical: updatedCritical });
+      await api.updatePatient(patientId, { critical: updatedCritical, revision: patient.revision });
       setEditing(false);
       load();
     } catch (err) {
@@ -196,15 +211,15 @@ export default function PatientDashboard({ patientId = "", wallet = "" }) {
             <>
               <div className="data-row">
                 <span>Allergies</span>
-                <b>{(critical.allergies || []).join(", ") || "None recorded"}</b>
+                <b>{(critical.allergies || []).join(", ") || "Unknown"}</b>
               </div>
               <div className="data-row">
                 <span>Known Conditions</span>
-                <b>{(critical.conditions || []).join(", ") || "None recorded"}</b>
+                <b>{(critical.conditions || []).join(", ") || "Unknown"}</b>
               </div>
               <div className="data-row">
                 <span>Current Medications</span>
-                <b>{(critical.medications || []).join(", ") || "None recorded"}</b>
+                <b>{(critical.medications || []).join(", ") || "Unknown"}</b>
               </div>
             </>
           )}
@@ -212,6 +227,7 @@ export default function PatientDashboard({ patientId = "", wallet = "" }) {
 
         <article className="panel wide">
           <h3>Medical Records Timeline</h3>
+          <button onClick={downloadArchive} disabled={busy}>Download my complete record archive</button>
           <RecordTimeline records={records} onView={viewRecord} />
           {detail && (
             <div className="record-detail" style={{ marginTop: "1rem", padding: "1rem", background: "rgba(255,255,255,0.05)", borderRadius: "8px" }}>

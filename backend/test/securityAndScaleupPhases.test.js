@@ -314,6 +314,7 @@ test("B13: Transactional Outbox enqueues and reconciles tasks", async () => {
   const mockNotification = {
     sendEmergencyAlert: async () => {
       mockSent = true;
+      return [{ status: "DELIVERED" }];
     },
   };
 

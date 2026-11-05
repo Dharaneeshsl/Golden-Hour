@@ -10,27 +10,22 @@ if (!process.env.DATABASE_URL && require.main === module) {
 
 function getDbSslConfig() {
   if (process.env.DB_SSL !== "true") return undefined;
-
-  const isProduction = process.env.NODE_ENV === "production";
-  if (isProduction && !process.env.DB_CA) {
-    throw new Error("DB_CA certificate path is strictly required in production when DB_SSL is enabled");
+  const ca = process.env.DB_CA_PEM || (process.env.DB_CA ? fs.readFileSync(process.env.DB_CA,"utf8") : undefined);
+  if (process.env.NODE_ENV === "production" && (!ca || process.env.DB_REJECT_UNAUTHORIZED === "false")) {
+    throw new Error("Production database connections require verified TLS and a CA certificate");
   }
-
-  // Reject unauthorized by default unless explicitly disabled with DB_REJECT_UNAUTHORIZED="false"
-  const rejectUnauthorized = process.env.DB_REJECT_UNAUTHORIZED !== "false";
-
-  if (process.env.DB_CA) {
-    return {
-      ca: fs.readFileSync(process.env.DB_CA).toString(),
-      rejectUnauthorized,
-    };
-  }
-
-  return { rejectUnauthorized };
+  return {rejectUnauthorized:process.env.DB_REJECT_UNAUTHORIZED !== "false", ...(ca ? {ca} : {})};
 }
 
 async function runMigrations() {
   if (!process.env.DATABASE_URL) return;
+  if (process.env.NODE_ENV === "production") {
+    const url = new URL(process.env.DATABASE_URL);
+    if (process.env.DB_SSL !== "true" || process.env.DB_REJECT_UNAUTHORIZED === "false" ||
+        ["sslmode","sslrootcert","sslcert","sslkey","ssl"].some(k => url.searchParams.has(k))) {
+      throw new Error("Verified database TLS is required for production migrations");
+    }
+  }
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: getDbSslConfig(),

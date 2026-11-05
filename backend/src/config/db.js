@@ -22,6 +22,8 @@ function normalizePatient(row) {
     id: row.id,
     wallet: canonicalizeWallet(row.wallet),
     profile: typeof row.profile === "string" ? JSON.parse(row.profile) : (row.profile || {}),
+    revision: row.revision || 1,
+    summaryUpdatedAt: row.summary_updated_at || row.summaryUpdatedAt || null,
     critical: typeof row.critical === "string" ? JSON.parse(row.critical) : (row.critical || {}),
     createdAt: row.created_at || row.createdAt,
   };
@@ -96,23 +98,11 @@ function normalizeConsent(row) {
 
 function getDbSslConfig() {
   if (process.env.DB_SSL !== "true") return undefined;
-
-  const isProduction = process.env.NODE_ENV === "production";
-  if (isProduction && !process.env.DB_CA) {
-    throw new Error("DB_CA certificate path is strictly required in production when DB_SSL is enabled");
+  const ca = process.env.DB_CA_PEM || (process.env.DB_CA ? fs.readFileSync(process.env.DB_CA,"utf8") : undefined);
+  if (process.env.NODE_ENV === "production" && (!ca || process.env.DB_REJECT_UNAUTHORIZED === "false")) {
+    throw new Error("Production database connections require verified TLS and a CA certificate");
   }
-
-  // Reject unauthorized by default unless explicitly disabled with DB_REJECT_UNAUTHORIZED="false"
-  const rejectUnauthorized = process.env.DB_REJECT_UNAUTHORIZED !== "false";
-
-  if (process.env.DB_CA) {
-    return {
-      ca: fs.readFileSync(process.env.DB_CA).toString(),
-      rejectUnauthorized,
-    };
-  }
-
-  return { rejectUnauthorized };
+  return {rejectUnauthorized:process.env.DB_REJECT_UNAUTHORIZED !== "false", ...(ca ? {ca} : {})};
 }
 
 function createPool() {
@@ -120,31 +110,72 @@ function createPool() {
   return new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: getDbSslConfig(),
-    max: Number(process.env.DB_POOL_SIZE || 10),
+    max: Number(process.env.DB_POOL_SIZE || (process.env.VERCEL ? 2 : 10)),
     idleTimeoutMillis: 10000,
     connectionTimeoutMillis: 5000,
   });
 }
 
 class PostgresStore {
-  constructor(pool) {
+  async transaction(work) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await work(new PostgresStore(client, true));
+      await client.query("COMMIT");
+      return result;
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async emergencyQuota(wallet, max) {
+    const result = await this.query(
+      `INSERT INTO emergency_quota(wallet,requests,started_at) VALUES ($1,1,now())
+       ON CONFLICT(wallet) DO UPDATE SET
+         requests=CASE WHEN emergency_quota.started_at <= now()-interval '15 minutes' THEN 1 ELSE emergency_quota.requests+1 END,
+         started_at=CASE WHEN emergency_quota.started_at <= now()-interval '15 minutes' THEN now() ELSE emergency_quota.started_at END
+       WHERE emergency_quota.requests < $2 OR emergency_quota.started_at <= now()-interval '15 minutes'
+       RETURNING requests`, [wallet,max]);
+    return result.rowCount === 1;
+  }
+
+  async replaceCard(id, hash) {
+    await this.query("INSERT INTO emergency_cards(patient_id,token_hash) VALUES ($1,$2) ON CONFLICT(patient_id) DO UPDATE SET token_hash=EXCLUDED.token_hash", [id,hash]);
+  }
+
+  async cardPatient(hash) {
+    return (await this.query("SELECT patient_id FROM emergency_cards WHERE token_hash=$1", [hash])).rows[0]?.patient_id;
+  }
+
+  async rotateRefresh(id, oldHash, newHash) {
+    const result = await this.query("UPDATE sessions SET token_hash=$3 WHERE id=$1 AND token_hash=$2 AND revoked_at IS NULL AND expires_at > now()", [id,oldHash,newHash]);
+    return result.rowCount === 1;
+  }
+
+  async saveChallenge(wallet, message, expiresAt) {
+    await this.query("DELETE FROM login_challenges WHERE expires_at <= now()");
+    await this.query("INSERT INTO login_challenges(wallet,message,expires_at) VALUES ($1,$2,$3) ON CONFLICT (wallet) DO UPDATE SET message=EXCLUDED.message,expires_at=EXCLUDED.expires_at", [wallet,message,expiresAt]);
+  }
+
+  async getChallenge(wallet) {
+    return (await this.query("SELECT message FROM login_challenges WHERE wallet=$1 AND expires_at > now()", [wallet])).rows[0];
+  }
+
+  async consumeChallenge(wallet, message) {
+    return (await this.query("DELETE FROM login_challenges WHERE wallet=$1 AND message=$2 AND expires_at > now()", [wallet,message])).rowCount === 1;
+  }
+
+  constructor(pool, inTransaction = false) {
+    this.inTransaction = inTransaction;
     this.pool = pool;
   }
 
   async query(q, p = []) {
-    try {
-      return await this.pool.query(q, p);
-    } catch (e) {
-      if (
-        e.message &&
-        (e.message.includes("Connection terminated") ||
-          e.message.includes("closed") ||
-          e.message.includes("reset"))
-      ) {
-        return await this.pool.query(q, p);
-      }
-      throw e;
-    }
+    return this.pool.query(q, p);
   }
 
   async patientById(id) {
@@ -181,8 +212,8 @@ class PostgresStore {
     const newProfile = patch.profile ? { ...current.profile, ...patch.profile } : current.profile;
     const newCritical = patch.critical ? { ...current.critical, ...patch.critical } : current.critical;
     const r = await this.query(
-      "UPDATE patients SET profile=$2, critical=$3 WHERE id=$1 RETURNING *",
-      [id, JSON.stringify(newProfile), JSON.stringify(newCritical)]
+      "UPDATE patients SET profile=$2, critical=$3, revision=revision+1, summary_updated_at=CASE WHEN $5 THEN now() ELSE summary_updated_at END WHERE id=$1 AND revision=$4 RETURNING *",
+      [id, JSON.stringify(newProfile), JSON.stringify(newCritical), patch.revision, Boolean(patch.critical)]
     );
     return normalizePatient(r.rows[0]);
   }
@@ -276,8 +307,8 @@ class PostgresStore {
 
   async grantConsent(x) {
     const r = await this.query(
-      "INSERT INTO patient_provider_consents(id,patient_id,provider_id,status,scope,granted_at) VALUES($1,$2,$3,'active',$4,$5) ON CONFLICT(patient_id,provider_id) DO UPDATE SET status='active',scope=EXCLUDED.scope,granted_at=EXCLUDED.granted_at,revoked_at=null RETURNING *",
-      [x.id, x.patientId, x.providerId, JSON.stringify(x.scope), x.grantedAt]
+      "INSERT INTO patient_provider_consents(id,patient_id,provider_id,status,scope,granted_at,purpose,expires_at) VALUES($1,$2,$3,'active',$4,$5,$6,$7) ON CONFLICT(patient_id,provider_id) DO UPDATE SET status='active',scope=EXCLUDED.scope,granted_at=EXCLUDED.granted_at,purpose=EXCLUDED.purpose,expires_at=EXCLUDED.expires_at,revoked_at=null RETURNING *",
+      [x.id, x.patientId, x.providerId, JSON.stringify(x.scope), x.grantedAt, x.purpose, x.expiresAt || null]
     );
     return normalizeConsent(r.rows[0]);
   }
@@ -327,8 +358,8 @@ class PostgresStore {
   // --- Sessions (B11) ---
   async createSession(x) {
     const r = await this.query(
-      "INSERT INTO sessions(id, user_id, token_hash, ip_address, user_agent, expires_at, created_at) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *",
-      [x.id, isValidUuid(x.userId) ? x.userId : null, x.tokenHash, x.ipAddress || null, x.userAgent || null, x.expiresAt, x.createdAt || new Date().toISOString()]
+      "INSERT INTO sessions(id, wallet, token_hash, ip_address, user_agent, expires_at, created_at, mfa_verified) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *",
+      [x.id, x.wallet, x.tokenHash, x.ipAddress || null, x.userAgent || null, x.expiresAt, x.createdAt || new Date().toISOString(), Boolean(x.mfaVerified)]
     );
     return r.rows[0];
   }
@@ -415,7 +446,7 @@ class PostgresStore {
       `SELECT bge.*, bgr.decision, bgr.reviewer_id, bgr.notes, bgr.created_at as reviewed_at
        FROM break_glass_events bge
        LEFT JOIN break_glass_reviews bgr ON bgr.event_id = bge.id
-       ORDER BY bge.created_at DESC LIMIT $1 OFFSET $2`,
+       WHERE bgr.event_id IS NULL ORDER BY bge.created_at DESC LIMIT $1 OFFSET $2`,
       [limit, offset]
     );
     return r.rows;
@@ -423,7 +454,7 @@ class PostgresStore {
 
   async addBreakGlassReview(x) {
     const r = await this.query(
-      "INSERT INTO break_glass_reviews(id, event_id, reviewer_id, decision, notes, created_at) VALUES($1,$2,$3,$4,$5,$6) RETURNING *",
+      "INSERT INTO break_glass_reviews(id, event_id, reviewer_id, decision, notes, created_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(event_id) DO NOTHING RETURNING *",
       [x.id, x.eventId, x.reviewerId, x.decision, x.notes || null, x.createdAt || new Date().toISOString()]
     );
     return r.rows[0];
@@ -498,6 +529,42 @@ class PostgresStore {
 }
 
 class JsonStore {
+  replaceCard(id, hash) {
+    this.state.cards ??= {};
+    this.state.cards[id] = hash;
+    this.save();
+  }
+
+  cardPatient(hash) {
+    return Object.keys(this.state.cards || {}).find(id => this.state.cards[id] === hash);
+  }
+
+  rotateRefresh(id, oldHash, newHash) {
+    const session = this.state.sessions?.find(s => s.id === id && s.tokenHash === oldHash);
+    if (!session || session.revokedAt || Date.parse(session.expiresAt) <= Date.now()) return false;
+    session.tokenHash = newHash;
+    this.save();
+    return true;
+  }
+
+  challenges = new Map();
+
+  saveChallenge(wallet, message, expiresAt) {
+    for (const [key, entry] of this.challenges) {
+      if (Date.parse(entry.expiresAt) <= Date.now()) this.challenges.delete(key);
+    }
+    this.challenges.set(wallet, {message, expiresAt});
+  }
+
+  getChallenge(wallet) {
+    const entry = this.challenges.get(wallet);
+    return entry && Date.parse(entry.expiresAt) > Date.now() ? entry : null;
+  }
+
+  consumeChallenge(wallet, message) {
+    return this.getChallenge(wallet)?.message === message && this.challenges.delete(wallet);
+  }
+
   constructor(
     file = process.env.DATA_FILE ||
       (fs.existsSync(path.join(process.cwd(), ".data", "goldenhour.json"))
@@ -549,6 +616,9 @@ class JsonStore {
     const index = this.state.patients.findIndex((x) => x.id === id);
     if (index === -1) return null;
     const x = this.state.patients[index];
+    if ((x.revision || 1) !== patch.revision) return null;
+    x.revision = (x.revision || 1) + 1;
+    if (patch.critical) x.summaryUpdatedAt = new Date().toISOString();
     if (patch.profile) x.profile = { ...x.profile, ...patch.profile };
     if (patch.critical) x.critical = { ...x.critical, ...patch.critical };
     this.save();
@@ -791,6 +861,7 @@ class JsonStore {
 
   async addBreakGlassReview(x) {
     this.state.breakGlassReviews = this.state.breakGlassReviews || [];
+    if (this.state.breakGlassReviews.some(r => r.eventId === x.eventId)) return null;
     const review = { ...x, createdAt: x.createdAt || new Date().toISOString() };
     this.state.breakGlassReviews.push(review);
     this.save();

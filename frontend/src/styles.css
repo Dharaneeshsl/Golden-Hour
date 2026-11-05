@@ -598,3 +598,8 @@ footer {
     grid-template-columns: 1fr 1fr;
   }
 }
+@media print {
+  body:has(.qr svg) * { visibility: hidden; }
+  body:has(.qr svg) .qr svg, body:has(.qr svg) .qr svg * { visibility: visible; }
+  body:has(.qr svg) .qr svg { position: absolute; top: 1cm; left: 1cm; }
+}

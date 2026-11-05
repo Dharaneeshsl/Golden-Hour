@@ -1,6 +1,6 @@
 import { clearBrowserSession, markWalletConnected } from "./utils/session";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
+const API_URL = (import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? "" : "http://localhost:4000")).replace(/\/$/, "");
 
 export function setToken(t) {
   if (typeof localStorage === "undefined") return;
@@ -28,7 +28,7 @@ export async function request(path, options = {}) {
   const data = await r.json().catch(() => ({}));
 
   if (!r.ok) {
-    if (r.status === 401 && path !== "/api/auth/verify") {
+    if (r.status === 401 && !path.startsWith("/api/auth/")) {
       clearBrowserSession();
       if (typeof window !== "undefined") {
         window.dispatchEvent(new Event("goldenhour_session_expired"));
@@ -43,6 +43,16 @@ export async function request(path, options = {}) {
 }
 
 export const api = {
+  requestRecovery: body => request("/api/recovery",{method:"POST",body:JSON.stringify(body)}),
+  recoveries: () => request("/api/recovery"),
+  reviewRecovery: (id,decision) => request(`/api/recovery/${id}/review`,{method:"POST",body:JSON.stringify({decision,identityVerified:decision==="approve"})}),
+  inviteStaff: wallet => request("/api/doctors/invitations", {method:"POST",body:JSON.stringify({wallet})}),
+  patientArchive: () => request("/api/compliance/me/archive"),
+  operations: () => request("/api/operations"),
+  updateOperations: body => request("/api/operations", {method:"PUT",body:JSON.stringify(body)}),
+  issueCard: () => request("/api/patients/me/card", { method: "POST" }),
+  mfaSetup: mfaToken => request("/api/auth/mfa/setup", {method:"POST", body:JSON.stringify({mfaToken})}),
+  mfaComplete: (mfaToken,code) => request("/api/auth/mfa/complete", {method:"POST", body:JSON.stringify({mfaToken,code})}),
   nonce: (w) => request(`/api/auth/nonce/${w}`),
   verify: (body) => request("/api/auth/verify", { method: "POST", body: JSON.stringify(body) }),
   me: () => request("/api/patients/me"),
@@ -56,6 +66,8 @@ export const api = {
   emergency: (body) => request("/api/emergency-access", { method: "POST", body: JSON.stringify(body) }),
   emergencyCritical: (id) => request(`/api/emergency-access/critical/${id}`),
   audit: (id) => request(`/api/emergency-access/${id}`),
+  pendingReviews: () => request("/api/emergency-access/reviews/pending"),
+  reviewEmergency: (id, decision) => request(`/api/emergency-access/reviews/${id}`, {method:"POST", body:JSON.stringify({decision})}),
   recentAudits: () => request("/api/emergency-access/recent/all"),
   providerAccess: () => request("/api/doctors/access"),
   registerProvider: (body) => request("/api/doctors/register", { method: "POST", body: JSON.stringify(body) }),

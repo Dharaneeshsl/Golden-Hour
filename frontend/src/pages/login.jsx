@@ -1,22 +1,21 @@
+import { QRCodeSVG } from "qrcode.react";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ethers } from "ethers";
 import { api, setToken } from "../api";
 
 export default function Login({ onLogin }) {
+  const cardToken = useLocation().state?.cardToken;
   const navigate = useNavigate();
+  const [mfa, setMfa] = useState(null);
+  const [setup, setSetup] = useState(null);
+  const [code, setCode] = useState("");
+  const [recovery, setRecovery] = useState(null);
   const [wallet, setWallet] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const authenticateWithSigner = async (targetWallet, signFn) => {
-    setBusy(true);
-    setError("");
-    try {
-      const nonce = await api.nonce(targetWallet);
-      const signature = await signFn(nonce.message);
-      const result = await api.verify({ wallet: targetWallet, signature });
-
+  const finishLogin = async (result) => {
       setToken(result.token);
       let user = result.user;
       try {
@@ -30,7 +29,7 @@ export default function Login({ onLogin }) {
 
       onLogin(user);
       navigate(
-        user.role === "admin"
+        user.role === "doctor" && /^[a-f0-9]{64}$/.test(cardToken) ? "/emergency/card#" + cardToken : user.role === "admin"
           ? "/admin"
           : user.role === "doctor"
           ? "/doctor"
@@ -38,6 +37,37 @@ export default function Login({ onLogin }) {
           ? "/patient/me"
           : "/onboarding"
       );
+  };
+
+  const completeMfa = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api.mfaComplete(mfa.mfaToken, code.trim());
+      setCode("");
+      setSetup(null);
+      if (result.recoveryCodes) setRecovery(result);
+      else await finishLogin(result);
+    } catch (err) {setError(err.message);}
+    finally {setBusy(false);}
+  };
+
+  const authenticateWithSigner = async (targetWallet, signFn) => {
+    setBusy(true);
+    setError("");
+    try {
+      const nonce = await api.nonce(targetWallet);
+      const signature = await signFn(nonce.message);
+      const result = await api.verify({ wallet: targetWallet, signature });
+
+      if (result.mfaRequired) {
+        setMfa(result);
+        if (result.enrollmentRequired) setSetup(await api.mfaSetup(result.mfaToken));
+      } else {
+        await finishLogin(result);
+      }
+
     } catch (err) {
       if (
         err.code === "ACTION_REJECTED" ||
@@ -102,6 +132,28 @@ export default function Login({ onLogin }) {
       console.warn("Account switch cancelled", e);
     }
   };
+  if (recovery) return <section className="panel">
+    <h2>Save your recovery codes</h2>
+    <p>Store these codes somewhere private outside this device. Each code replaces an authenticator code once. Your wallet signature is still required.</p>
+    <pre>{recovery.recoveryCodes.join("\n")}</pre>
+    <button className="primary" onClick={() => finishLogin(recovery)}>I saved my codes. Continue</button>
+  </section>;
+  if (mfa) return <section className="panel">
+    <h2>{setup ? "Set up your staff authenticator" : "Verify staff sign-in"}</h2>
+    {setup && <div>
+      <p>Scan this QR code with your authenticator app, then enter its six-digit code.</p>
+      <QRCodeSVG value={setup.uri} size={180} />
+      <p>Manual setup key</p><code>{setup.secret}</code>
+    </div>}
+    <form onSubmit={completeMfa}>
+      <label htmlFor="mfa-code">Authenticator or recovery code</label>
+      <input id="mfa-code" value={code} onChange={e => setCode(e.target.value)} autoComplete="one-time-code" required />
+      <button className="primary" disabled={busy}>Verify code</button>
+    </form>
+    {error && <p role="alert">{error}</p>}
+    <button onClick={() => {setMfa(null);setSetup(null);setCode("");setError("");}}>Restart sign-in</button>
+  </section>;
+
   return (
     <section className="dashboard">
       <div className="panel login-panel">

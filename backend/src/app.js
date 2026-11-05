@@ -27,26 +27,60 @@ const emergencyRoutes = require("./routes/emergencyRoutes");
 const consentRoutes = require("./routes/consentRoutes");
 const authRoutes = require("./routes/authRoutes");
 const complianceRoutes = require("./routes/complianceRoutes");
+const {PostgresRateLimitStore} = require("./services/rateLimitStore");
+const { requireAuth } = require("./middleware/authMiddleware");
+const { asyncHandler } = require("./utils/asyncHandler");
 const { validateStartupConfig } = require("./config/validateConfig");
 
 async function createApp({
   store,
   chain = new ChainService(),
   encryption = defaultEncryption,
-  ipfs = defaultIpfs,
+  ipfs,
 } = {}) {
   validateStartupConfig();
+  const ownsStore = !store;
   store = store || (await createStore());
+  try {
+  if (process.env.NODE_ENV === "production" && chain.enabled) {
+    throw new Error("Public chain writes are disabled for hospital deployments");
+  }
+  ipfs ??= process.env.NODE_ENV === "production" ? {
+    async uploadEncrypted(payload) {
+      const cid = crypto.randomUUID();
+      await store.query("INSERT INTO encrypted_objects(id,payload) VALUES ($1,$2)", [cid,payload]);
+      return {cid, persisted: true};
+    },
+    async fetchEncrypted(cid) {
+      const result = await store.query("SELECT payload FROM encrypted_objects WHERE id=$1", [cid]);
+      if (!result.rowCount) throw new Error("Private record object unavailable");
+      return result.rows[0].payload;
+    }
+  } : defaultIpfs;
   const app = express();
+  app.use("/api", (_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+    next();
+  });
   app.disable("x-powered-by");
   app.set("store", store);
 
-  if (process.env.TRUST_PROXY) {
+  if (process.env.VERCEL) {
+    app.set("trust proxy", 1);
+  } else if (process.env.TRUST_PROXY) {
     app.set("trust proxy", process.env.TRUST_PROXY === "true" ? 1 : process.env.TRUST_PROXY);
   }
 
   app.use((req, res, next) => {
     req.requestId = crypto.randomUUID();
+    if (process.env.NODE_ENV === "production") {
+      const start = performance.now();
+      res.once("finish", () => console.info(JSON.stringify({
+        event:"http", requestId:req.requestId, method:req.method,
+        route:req.route?.path || "unmatched", status:res.statusCode,
+        durationMs:Math.round(performance.now() - start)
+      })));
+    }
     res.setHeader("X-Request-Id", req.requestId);
     next();
   });
@@ -60,13 +94,7 @@ async function createApp({
     helmet(),
     cors({
       origin: (origin, callback) => {
-        // Bug #9 Fix: Do not allow missing origin in production
-        if (!origin) {
-          if (process.env.NODE_ENV === "production") {
-            return callback(new Error("CORS policy restriction: Origin header required in production"));
-          }
-          return callback(null, true);
-        }
+        if (!origin) return callback(null, false);
         if (allowedOrigins.includes(origin)) {
           return callback(null, true);
         }
@@ -82,6 +110,7 @@ async function createApp({
     rateLimit({
       windowMs: 15 * 60 * 1000,
       max: 300,
+      ...(store.query ? {store:new PostgresRateLimitStore(store,"api")} : {}),
       standardHeaders: true,
       legacyHeaders: false,
     })
@@ -90,25 +119,37 @@ async function createApp({
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 60,
+    ...(store.query ? {store:new PostgresRateLimitStore(store,"auth")} : {}),
     message: { error: "Too many authentication requests, please try again later" },
   });
 
   const envelopeEncryption = new EnvelopeEncryptionService(process.env.KMS_MASTER_KEY, store);
+  if (process.env.NODE_ENV === "production" && envelopeEncryption.keyService) {
+    const probe = crypto.randomBytes(32);
+    try {
+      const wrapped = await envelopeEncryption.keyService.wrap(probe);
+      const unwrapped = await envelopeEncryption.keyService.unwrap(wrapped);
+      try {
+        if (!crypto.timingSafeEqual(probe, unwrapped)) throw new Error("Key-service round trip failed");
+      } finally { unwrapped.fill(0); }
+    } finally { probe.fill(0); }
+  }
   const auditChain = new AuditChainService(store);
   const c = { store, chain, encryption, ipfs, envelopeEncryption, auditChain };
 
-  app.get("/health", (_q, s) =>
+  app.get(["/health","/api/health"], (_q, s) =>
     s.json({
       status: "ok",
       chain: chain.enabled ? "backend-relay-configured" : "not-configured",
     })
   );
 
-  app.get("/ready", async (_q, s) => {
+  app.get(["/ready","/api/ready"], async (_q, s) => {
     try {
       if (store.query) {
         // Bug #31 Fix: Verify migration table exists in database
-        await store.query("SELECT filename FROM schema_migrations LIMIT 1");
+        const result = await store.query("SELECT 1 FROM schema_migrations WHERE filename=$1", ["011_patient_recovery.sql"]);
+        if (!result.rowCount) throw new Error("Pending schema upgrade");
       }
       s.json({
         status: "ready",
@@ -119,12 +160,49 @@ async function createApp({
     }
   });
 
+  let localControls = {enrollment_paused:false, emergency_paused:false};
+  async function controls() {
+    if (!store.query) return localControls;
+    return (await store.query("SELECT enrollment_paused,emergency_paused FROM service_controls WHERE id=1")).rows[0];
+  }
+  app.get("/api/operations", requireAuth, asyncHandler(async (req,res) => {
+    if (req.user.role !== "admin") return res.sendStatus(403);
+    res.json(await controls());
+  }));
+  app.put("/api/operations", requireAuth, asyncHandler(async (req,res) => {
+    if (req.user.role !== "admin") return res.sendStatus(403);
+    const {enrollment_paused, emergency_paused} = req.body || {};
+    if (typeof enrollment_paused !== "boolean" || typeof emergency_paused !== "boolean") return res.sendStatus(400);
+    const persist = async (tx, audit) => {
+      await audit.appendAuditEvent({actor:req.user.wallet,action:"SERVICE_CONTROLS_CHANGED",details:{enrollment_paused,emergency_paused}});
+      await tx.query("UPDATE service_controls SET enrollment_paused=$1,emergency_paused=$2 WHERE id=1",[enrollment_paused,emergency_paused]);
+    };
+    if (store.transaction) await store.transaction(tx => persist(tx,new AuditChainService(tx)));
+    else {
+      await auditChain.appendAuditEvent({actor:req.user.wallet,action:"SERVICE_CONTROLS_CHANGED",details:{enrollment_paused,emergency_paused}});
+      localControls = {enrollment_paused,emergency_paused};
+    }
+    res.json(await controls());
+  }));
+  app.use("/api", asyncHandler(async (req,res,next) => {
+    if ((req.method === "POST" && req.path === "/patients") || req.path.startsWith("/emergency-access")) {
+      const state = await controls();
+      if ((req.path === "/patients" && state.enrollment_paused) ||
+          (req.path.startsWith("/emergency-access") && state.emergency_paused &&
+            (req.path === "/emergency-access" || req.path.startsWith("/emergency-access/critical/")))) {
+        return res.status(503).json({error:"This service is temporarily paused. Follow the hospital's usual care procedure."});
+      }
+    }
+    next();
+  }));
+
   app.use("/api/auth", authLimiter, authRoutes({ store }));
   app.use("/api/patients", patientRoutes(createPatientController(c)));
   app.use("/api/doctors", doctorRoutes(createDoctorController(c)));
   app.use("/api/records", recordRoutes(createRecordController(c), store));
   app.use("/api/emergency-access", emergencyRoutes(createEmergencyController(c), store));
   app.use("/api/consents", consentRoutes(createConsentController(c)));
+  app.use("/api/recovery", require("./routes/recoveryRoutes")({store}));
   app.use("/api/compliance", complianceRoutes(createComplianceController(c)));
 
   // B8: Global asynchronous error mapper
@@ -139,6 +217,10 @@ async function createApp({
   });
 
   return app;
+  } catch (error) {
+    if (ownsStore) await store.pool?.end();
+    throw error;
+  }
 }
 
 if (require.main === module) {
@@ -147,10 +229,24 @@ if (require.main === module) {
     const server = app.listen(port, () => {
       console.log(`GoldenHour backend listening on port ${port}`);
     });
-    process.on("SIGTERM", () => {
-      console.log("SIGTERM signal received: closing HTTP server");
-      server.close(() => console.log("HTTP server closed"));
-    });
+    let stopping = false;
+    const shutdown = () => {
+      if (stopping) return;
+      stopping = true;
+      const timeout = setTimeout(() => process.exit(1), 15000);
+      timeout.unref();
+      server.close(async () => {
+        try { await app.get("store")?.pool?.end(); }
+        catch { process.exitCode = 1; }
+        finally { clearTimeout(timeout); }
+      });
+      server.closeIdleConnections();
+    };
+    process.on("SIGTERM", shutdown);
+    process.on("SIGINT", shutdown);
+  }).catch(() => {
+    console.error("Application startup failed. Check deployment configuration and dependency health.");
+    process.exit(1);
   });
 }
 

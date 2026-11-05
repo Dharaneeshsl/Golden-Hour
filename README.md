@@ -2,6 +2,8 @@
 
 > **Privacy-First Emergency Medical Information Access System with Web3 Wallet Auth, Patient Consent Control, AES-256-GCM Encryption, PostgreSQL Persistence, and Ethereum Blockchain Auditability.**
 
+For current hospital-pilot capabilities and outstanding launch evidence, see [the release record](docs/HOSPITAL_DEPLOYMENT.md).
+
 GoldenHour is a reference implementation and engineering platform demonstrating how critical medical data can be accessed instantly in life-threatening emergencies **without sacrificing patient privacy or data sovereignty**. It is currently executing a disciplined multi-step security and architectural scale-up roadmap.
 
 ---
@@ -201,18 +203,11 @@ npm run frontend
 
 ---
 
+For Vercel, follow [the Vercel setup guide](docs/VERCEL_DEPLOYMENT.md).
+
 ## 🐳 Docker Deployment
 
-To spin up the entire application stack (PostgreSQL, Backend API with automatic migrations, and Frontend):
-
-```bash
-docker compose up --build
-```
-
-The Compose configuration includes:
-- **`postgres`**: PostgreSQL 16 with health checks and persistent volume `postgres_data`.
-- **`backend`**: Node.js 20 service running automatic database migrations and API server.
-- **`frontend`**: Production container serving the optimized React client on port 3000.
+For local development, run `docker compose -f docker-compose.dev.yml up --build`. For a single-hospital staging deployment, see [deployment and verification](docs/HOSPITAL_DEPLOYMENT.md). The default Compose file expects a private TLS database and a public hostname.
 
 ---
 

@@ -12,6 +12,7 @@ export default function DoctorDashboard({ wallet }) {
   const [provider, setProvider] = useState(null);
   const [activeConsents, setActiveConsents] = useState([]);
   const [name, setName] = useState("");
+  const [invitationToken, setInvitationToken] = useState("");
   const [licenseNumber, setLicenseNumber] = useState("");
   const [specialty, setSpecialty] = useState("");
   const [recordType, setRecordType] = useState("Consultation");
@@ -40,12 +41,18 @@ export default function DoctorDashboard({ wallet }) {
       });
   }, []);
 
+  useEffect(() => {
+    if (!selected?.expiresAt) return;
+    const timer = setTimeout(() => setSelected(null), Math.max(0, Date.parse(selected.expiresAt) - Date.now()));
+    return () => clearTimeout(timer);
+  }, [selected]);
+
   const register = async (e) => {
     e.preventDefault();
     setBusy(true);
     setError("");
     try {
-      const result = await api.registerProvider({ name, licenseNumber, specialty });
+      const result = await api.registerProvider({ name, licenseNumber, specialty, invitationToken });
       setProvider({ provider: result, status: result.status });
       setNotice("Provider registration submitted. An administrator must verify it.");
     } catch (err) {
@@ -77,6 +84,7 @@ export default function DoctorDashboard({ wallet }) {
       setSelected(await api.recordDetail(patientId, id));
       setError("");
     } catch (e) {
+      setSelected(null);
       setError(e.message);
     } finally {
       setBusy(false);
@@ -111,6 +119,7 @@ export default function DoctorDashboard({ wallet }) {
       const critical = await api.emergencyCritical(result.accessId);
       setNotice(`Emergency access valid until ${new Date(critical.expiresAt).toLocaleTimeString()}.`);
       setSelected({
+        expiresAt: critical.expiresAt,
         clinicalData: { critical: critical.critical },
         recordType: "Emergency Critical Context",
       });
@@ -134,6 +143,9 @@ export default function DoctorDashboard({ wallet }) {
             Full Name
             <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Dr. Jane Doe" />
           </label>
+            <label>Hospital invitation code
+              <input value={invitationToken} onChange={event => setInvitationToken(event.target.value)} autoComplete="off" />
+            </label>
           <label>
             Medical License Number
             <input required value={licenseNumber} onChange={(e) => setLicenseNumber(e.target.value)} placeholder="MD-123456" />
@@ -247,7 +259,7 @@ export default function DoctorDashboard({ wallet }) {
               </button>
             </form>
 
-            <h3 className="subheading" style={{ marginTop: "2rem" }}>Break-Glass Emergency Access (v2)</h3>
+            <h3 className="subheading" style={{ marginTop: "2rem" }}>Emergency Access</h3>
             <label>
               Clinical Reason Code
               <select value={reasonCode} onChange={(e) => setReasonCode(e.target.value)} style={{ marginBottom: "0.5rem" }}>

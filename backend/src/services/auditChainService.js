@@ -1,5 +1,11 @@
 const crypto = require("crypto");
 
+function sortAuditValue(value) {
+  if (Array.isArray(value)) return value.map(sortAuditValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.keys(value).sort().map(key => [key,sortAuditValue(value[key])]));
+}
+
 function canonicalAuditPayload(id, patientId, actor, action, details, timestamp, previousHash) {
   const ts = timestamp instanceof Date ? timestamp.toISOString() : (timestamp ? new Date(timestamp).toISOString() : new Date().toISOString());
   const det = typeof details === "string" ? JSON.parse(details) : (details || {});
@@ -8,7 +14,7 @@ function canonicalAuditPayload(id, patientId, actor, action, details, timestamp,
     patientId: patientId ? String(patientId) : null,
     actor: String(actor || "").toLowerCase(),
     action: String(action),
-    details: det,
+    details: det._hashEncoding === "canonical-json-v2" ? sortAuditValue(det) : det,
     timestamp: ts,
     previousHash: String(previousHash),
   });
@@ -47,6 +53,13 @@ class AuditChainService {
   }
 
   async appendAuditEvent({ id, patientId, actor, action, details = {}, timestamp = new Date().toISOString() }) {
+    if (process.env.NODE_ENV === "production" && this.store?.transaction) {
+      if (!this.store.inTransaction) {
+        return this.store.transaction(tx => new AuditChainService(tx).appendAuditEvent({id, patientId, actor, action, details, timestamp}));
+      }
+      await this.store.query("SELECT pg_advisory_xact_lock(849204820)");
+    }
+    details = {...details,_hashEncoding:"canonical-json-v2"};
     const eventId = id || crypto.randomUUID();
     const isoTimestamp = timestamp instanceof Date ? timestamp.toISOString() : new Date(timestamp).toISOString();
     const previousHash = await this.getLatestHash();
@@ -102,11 +115,13 @@ class AuditChainService {
   async verifyChainIntegrity(patientId = null) {
     let chainToVerify = [];
     if (this.store && this.store.getAuditEvents) {
-      chainToVerify = await this.store.getAuditEvents(patientId, 1000, 0);
+      for (let offset=0;;offset+=1000) {
+        const page = await this.store.getAuditEvents(null,1000,offset);
+        chainToVerify.push(...page);
+        if (page.length<1000) break;
+      }
     } else {
-      chainToVerify = patientId
-        ? this.memoryChain.filter((e) => e.patientId === patientId || e.patient_id === patientId)
-        : this.memoryChain;
+      chainToVerify = this.memoryChain;
     }
 
     for (let i = 0; i < chainToVerify.length; i++) {

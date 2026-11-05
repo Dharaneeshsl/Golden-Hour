@@ -1,9 +1,32 @@
 const crypto = require("crypto");
 const { buildIPSBundle } = require("../services/fhirService");
+const { canonicalJsonStringify } = require("./recordController");
+const { asyncHandler } = require("../utils/asyncHandler");
 const { canonicalizeWallet } = require("../config/db");
 
-function createComplianceController({ store }) {
+function createComplianceController({ store, ipfs, encryption, envelopeEncryption, auditChain }) {
   return {
+    archive: asyncHandler(async (req,res) => {
+      const patient = await store.patientByWallet(req.user.wallet);
+      if (!patient) return res.status(403).json({error:"Patient enrollment required"});
+      const records = await store.recordsForPatient(patient.id);
+      const exported = [];
+      for (const record of records) {
+        const encrypted = await ipfs.fetchEncrypted(record.ipfsCid);
+        const hash = crypto.createHash("sha256").update(canonicalJsonStringify(encrypted)).digest("hex");
+        if (hash !== record.encryptedHash) throw new Error("Record integrity check failed");
+        let clinicalData;
+        if (encrypted.version === 2) {
+          if (encrypted.aad?.patientId !== patient.id || encrypted.aad?.recordId !== record.id) throw new Error("Record binding mismatch");
+          clinicalData = (await envelopeEncryption.decryptField(patient.id,encrypted)).value;
+        } else clinicalData = encryption.decryptJson(encrypted);
+        exported.push({id:record.id,type:record.recordType,createdAt:record.createdAt,clinicalData});
+      }
+      await auditChain.appendAuditEvent({patientId:patient.id,actor:req.user.wallet,action:"PATIENT_ARCHIVE_EXPORTED",details:{recordCount:exported.length}});
+      res.setHeader("Content-Disposition",'attachment; filename="goldenhour-patient-archive.json"');
+      res.json({exportedAt:new Date().toISOString(),patient,records:exported,audit:await store.auditForPatient(patient.id)});
+    }),
+
     exportData: async (req, res) => {
       try {
         const patientId = req.params.patientId;
@@ -87,7 +110,7 @@ function createComplianceController({ store }) {
               [dsrRecord.id, patientId, requestType, dsrRecord.details, dsrRecord.status, dsrRecord.createdAt]
             );
           } catch (e) {
-            console.warn("Could not insert into data_subject_requests table:", e.message);
+            throw new Error("Could not persist patient request", {cause: e});
           }
         }
 

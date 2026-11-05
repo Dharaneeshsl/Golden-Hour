@@ -1,60 +1,57 @@
+# One isolated hospital per deployment. Supply two credentials for the same private TLS database.
 services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: goldenhour
-      POSTGRES_PASSWORD: goldenhour
-      POSTGRES_DB: goldenhour
-    ports:
-      - "5432:5432"
-    volumes:
-      - goldenhour_pg_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U goldenhour"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  backend:
-    build:
-      context: ./backend
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
+  migrate:
+    build: ./backend
     environment:
       NODE_ENV: production
-      PORT: 4000
-      FRONTEND_ORIGIN: http://localhost:3000,http://localhost:5173
-      JWT_SECRET: ${JWT_SECRET}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
-      DATABASE_URL: postgresql://goldenhour:goldenhour@postgres:5432/goldenhour
-      DB_SSL: "false"
-      ADMIN_WALLETS: ${ADMIN_WALLETS}
-      RPC_URL: ${RPC_URL:-}
-      BACKEND_PRIVATE_KEY: ${BACKEND_PRIVATE_KEY:-}
-      REGISTRY_ADDRESS: ${REGISTRY_ADDRESS:-}
-      ACCESS_CONTROL_ADDRESS: ${ACCESS_CONTROL_ADDRESS:-}
-      RECORDS_ADDRESS: ${RECORDS_ADDRESS:-}
-      AUDIT_ADDRESS: ${AUDIT_ADDRESS:-}
-      EMERGENCY_ADDRESS: ${EMERGENCY_ADDRESS:-}
-      PINATA_JWT: ${PINATA_JWT:-}
-    ports:
-      - "4000:4000"
-    command: >
-      sh -c "node src/config/migrate.js && node src/app.js"
-
+      DATABASE_URL: ${MIGRATION_DATABASE_URL:?Set migration credentials}
+      DB_SSL: "true"
+      DB_CA: /run/secrets/db_ca
+    secrets: [db_ca]
+    command: ["node", "src/config/migrate.js"]
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?Set runtime credentials}
+      DB_SSL: "true"
+      DB_CA: /run/secrets/db_ca
+      JWT_SECRET: ${JWT_SECRET:?Set JWT signing secret}
+      VAULT_ADDR: ${VAULT_ADDR:-}
+      VAULT_TRANSIT_KEY: ${VAULT_TRANSIT_KEY:-}
+      VAULT_TOKEN_FILE: /run/vault/token
+      KMS_MASTER_KEY: ${KMS_MASTER_KEY:?Set wrapping key}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set record encryption key}
+      ADMIN_WALLETS: ${ADMIN_WALLETS:?Set hospital administrator}
+      FRONTEND_ORIGIN: https://${PUBLIC_HOST:?Set hospital hostname}
+      AUTH_DOMAIN: ${PUBLIC_HOST}
+      AUTH_URI: https://${PUBLIC_HOST}
+      TRUST_PROXY: "true"
+    secrets: [db_ca]
+    volumes:
+      - ${VAULT_TOKEN_DIR:-./deploy/empty-vault}:/run/vault:ro
+    command: ["node", "src/app.js"]
   frontend:
     build:
       context: ./frontend
       args:
-        VITE_API_URL: http://localhost:4000
+        VITE_API_URL: /
     restart: unless-stopped
-    depends_on:
-      - backend
-    ports:
-      - "3000:3000"
-
+  gateway:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - gateway_data:/data
+    depends_on: [backend, frontend]
+secrets:
+  db_ca:
+    file: ${DB_CA:?Set path to database CA certificate}
 volumes:
-  goldenhour_pg_data:
+  gateway_data:

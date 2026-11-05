@@ -7,6 +7,9 @@ export default function PatientOnboarding({ onComplete }) {
   const [selectedRole, setSelectedRole] = useState("patient"); // 'patient' | 'doctor'
 
   // Patient Fields
+  const [oldWallet, setOldWallet] = useState("");
+  const [proofReference, setProofReference] = useState("");
+  const [recoveryReceipt, setRecoveryReceipt] = useState(null);
   const [name, setName] = useState("");
   const [bloodGroup, setBloodGroup] = useState("");
   const [allergies, setAllergies] = useState("");
@@ -15,6 +18,7 @@ export default function PatientOnboarding({ onComplete }) {
 
   // Provider Fields
   const [docName, setDocName] = useState("");
+  const [invitationToken, setInvitationToken] = useState("");
   const [licenseNumber, setLicenseNumber] = useState("");
   const [specialty, setSpecialty] = useState("");
 
@@ -58,6 +62,7 @@ export default function PatientOnboarding({ onComplete }) {
       await api.registerProvider({
         name: docName,
         licenseNumber,
+        invitationToken,
         specialty,
       });
       onComplete({ role: "doctor" });
@@ -165,6 +170,9 @@ export default function PatientOnboarding({ onComplete }) {
                 placeholder="Dr. Sarah Jenkins, MD"
               />
             </label>
+            <label>Hospital invitation code
+              <input value={invitationToken} onChange={event => setInvitationToken(event.target.value)} autoComplete="off" />
+            </label>
             <label>
               Medical License Number
               <input
@@ -189,6 +197,21 @@ export default function PatientOnboarding({ onComplete }) {
           </form>
         )}
 
+        <details>
+          <summary>Recover an existing patient profile</summary>
+          <p>Use this after your hospital opens an identity-verification case. Two different administrators must approve the recovery. Enter the case reference only.</p>
+          <form onSubmit={async event => {
+            event.preventDefault(); setBusy(true);setError("");
+            try {setRecoveryReceipt(await api.requestRecovery({oldWallet,proofReference}));}
+            catch (err) {setError(err.message);}
+            finally {setBusy(false);}
+          }}>
+            <label>Previous wallet address<input value={oldWallet} onChange={e => setOldWallet(e.target.value)} required /></label>
+            <label>Hospital verification case reference<input value={proofReference} onChange={e => setProofReference(e.target.value)} required /></label>
+            <button disabled={busy}>Request profile recovery</button>
+          </form>
+          {recoveryReceipt && <p>Reference {recoveryReceipt.id}. Contact the hospital for review, then sign in again after approval.</p>}
+        </details>
         {error && <p className="error" style={{ color: "#ef4444", marginTop: "1rem" }}>{error}</p>}
       </div>
     </section>
